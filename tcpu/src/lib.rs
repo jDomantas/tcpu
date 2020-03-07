@@ -3,7 +3,50 @@
 #[cfg(test)]
 mod tests;
 #[cfg(any(test, feature = "std"))]
-mod std_impls;
+mod box_storage {
+    use super::{Storage, DISK_SIZE, MEMORY_SIZE};
+
+    pub struct Memory {
+        storage: Box<[u8; MEMORY_SIZE]>,
+    }
+
+    impl Default for Memory {
+        fn default() -> Self {
+            Memory {
+                storage: unsafe {
+                    Box::from_raw(Box::into_raw(vec![0; MEMORY_SIZE].into_boxed_slice()) as *mut [u8; MEMORY_SIZE])
+                },
+            }
+        }
+    }
+
+    impl Storage<[u8; MEMORY_SIZE]> for Memory {
+        fn as_ref(&self) -> &[u8; MEMORY_SIZE] { &self.storage }
+        fn as_mut(&mut self) -> &mut [u8; MEMORY_SIZE] { &mut self.storage }
+    }
+
+    pub struct DiskMemory {
+        storage: Box<[u8; DISK_SIZE]>,
+    }
+
+    impl Default for DiskMemory {
+        fn default() -> Self {
+            DiskMemory {
+                storage: unsafe {
+                    Box::from_raw(Box::into_raw(vec![0; DISK_SIZE].into_boxed_slice()) as *mut [u8; DISK_SIZE])
+                },
+            }
+        }
+    }
+    
+    impl Storage<[u8; DISK_SIZE]> for DiskMemory {
+        fn as_ref(&self) -> &[u8; DISK_SIZE] { &self.storage }
+        fn as_mut(&mut self) -> &mut [u8; DISK_SIZE] { &mut self.storage }
+    }
+}
+
+#[cfg(any(test, feature = "std"))]
+pub use box_storage::{Memory, DiskMemory};
 
 use core::fmt;
 
@@ -16,7 +59,6 @@ pub const SCREEN_HEIGHT: usize = 96;
 const SCREEN_POSITION: u16 = 0b1100_0000_0000_0000;
 const SCREEN_REFRESH_TIME: u64 = 78643;
 const DISK_OP_SIZE: usize = 4096;
-const DISK_OP_EXTEND: u64 = 1_572_864 / 2;
 const CYCLES_PER_BYTE: u64 = 32;
 
 #[derive(Debug, PartialEq, Eq, Copy, Clone)]
@@ -145,31 +187,46 @@ macro_rules! disk_id_from {
 
 disk_id_from!(i8, u8, i16, u16, i32, u32, i64, u64, i128, u128, isize, usize);
 
-pub trait Storage<T> {
+pub trait Storage<T>: Default {
     fn as_ref(&self) -> &T;
     fn as_mut(&mut self) -> &mut T;
 }
 
-impl Storage<[u8; MEMORY_SIZE]> for [u8; MEMORY_SIZE] {
-    fn as_ref(&self) -> &[u8; MEMORY_SIZE] { self }
-    fn as_mut(&mut self) -> &mut [u8; MEMORY_SIZE] { self }
-}
-
-impl Storage<[u8; DISK_SIZE]> for [u8; DISK_SIZE] {
-    fn as_ref(&self) -> &[u8; DISK_SIZE] { self }
-    fn as_mut(&mut self) -> &mut [u8; DISK_SIZE] { self }
-}
-
-pub struct Disk<S> {
-    pub data: S,
+pub struct Disk<'a> {
+    pub data: &'a mut [u8; DISK_SIZE],
     pub modified: bool,
-    pub running: bool,
+    pub idle_time: u64,
 }
 
-struct PluggedDisk<S> {
-    disk: Disk<S>,
-    running_remaining: u64,
-    running_op: Option<DiskOp>,
+struct DiskSlot<S> {
+    data: S,
+    disk: SlotDisk,
+}
+
+enum SlotDisk {
+    Missing,
+    Present {
+        modified: bool,
+        idle_time: u64,
+        running_op: Option<DiskOp>,
+    }
+}
+
+impl SlotDisk {
+    fn finish_op(&mut self) {
+        if let SlotDisk::Present { running_op, .. } = self {
+            *running_op = None;
+        }
+    }
+}
+
+impl<S> DiskSlot<S> {
+    fn new(data: S) -> Self {
+        DiskSlot {
+            data,
+            disk: SlotDisk::Missing,
+        }
+    }
 }
 
 #[derive(PartialEq, Eq)]
@@ -254,20 +311,25 @@ pub struct Emulator<SM, SD, T = NoopTracer> {
     registers: Registers,
     instruction_pointer: u16,
     event_queue: EventQueue,
-    disks: [Option<PluggedDisk<SD>>; 2],
+    disk_slots: [DiskSlot<SD>; 2],
     cycles: u64,
     time_to_refresh: u64,
     state: CpuState,
 }
 
-impl<SM, SD> Emulator<SM, SD, NoopTracer> {
-    pub const fn new(memory: SM) -> Self {
-        Self::with_tracer(memory, NoopTracer)
+impl<SM, SD> Emulator<SM, SD, NoopTracer>
+where
+    SM: Storage<[u8; MEMORY_SIZE]>,
+    SD: Storage<[u8; DISK_SIZE]>,
+{
+    pub fn new() -> Self {
+        Self::with_tracer(Default::default(), Default::default(), NoopTracer)
     }
 }
 
 impl<SM, SD, T> Emulator<SM, SD, T> {
-    pub const fn with_tracer(memory: SM, tracer: T) -> Self {
+    pub fn with_tracer(memory: SM, disks: [SD; 2], tracer: T) -> Self {
+        let [d0, d1] = disks;
         Emulator {
             tracer,
             memory,
@@ -275,7 +337,7 @@ impl<SM, SD, T> Emulator<SM, SD, T> {
             registers: Registers::new(),
             instruction_pointer: 0,
             event_queue: EventQueue::new(),
-            disks: [None, None],
+            disk_slots: [DiskSlot::new(d0), DiskSlot::new(d1)],
             cycles: 0,
             time_to_refresh: SCREEN_REFRESH_TIME,
             state: CpuState::Running,
@@ -293,32 +355,43 @@ where
         self.event_queue.push(event);
     }
 
-    fn disk_slot_mut(&mut self, id: DiskId) -> &mut Option<PluggedDisk<SD>> {
+    fn disk_slot_mut(&mut self, id: DiskId) -> &mut DiskSlot<SD> {
         match id {
-            DiskId::D0 => &mut self.disks[0],
-            DiskId::D1 => &mut self.disks[1],
+            DiskId::D0 => &mut self.disk_slots[0],
+            DiskId::D1 => &mut self.disk_slots[1],
         }
     }
 
-    pub fn plug_disk(&mut self, id: DiskId, disk: Disk<SD>) -> Option<Disk<SD>> {
-        let old = self.unplug_disk(id);
-        *self.disk_slot_mut(id) = Some(PluggedDisk {
-            disk,
-            running_remaining: 0,
-            running_op: None,
-        });
-        old
-    }
-
-    pub fn unplug_disk(&mut self, id: DiskId) -> Option<Disk<SD>> {
-        self.disk_slot_mut(id).take().map(|s| s.disk)
-    }
-
-    pub fn disk(&self, id: DiskId) -> Option<&Disk<SD>> {
-        match id {
-            DiskId::D0 => self.disks[0].as_ref().map(|s| &s.disk),
-            DiskId::D1 => self.disks[1].as_ref().map(|s| &s.disk),
+    pub fn insert_disk(&mut self, id: DiskId) {
+        let slot = self.disk_slot_mut(id);
+        if let SlotDisk::Missing = slot.disk {
+            slot.disk = SlotDisk::Present {
+                modified: false,
+                idle_time: u64::max_value(),
+                running_op: None,
+            }
         }
+    }
+
+    pub fn remove_disk(&mut self, id: DiskId) {
+        let slot = self.disk_slot_mut(id);
+        slot.disk = SlotDisk::Missing;
+    }
+
+    pub fn disk(&mut self, id: DiskId) -> Option<Disk<'_>> {
+        let slot = self.disk_slot_mut(id);
+        match slot.disk {
+            SlotDisk::Missing => None,
+            SlotDisk::Present { modified, idle_time, .. } => Some(Disk {
+                modified,
+                idle_time,
+                data: slot.data.as_mut(),
+            }),
+        }
+    }
+
+    pub fn disk_slot(&mut self, id: DiskId) -> &mut SD {
+        &mut self.disk_slot_mut(id).data
     }
 
     pub fn screen(&self) -> &[[u8; SCREEN_WIDTH]; SCREEN_HEIGHT] {
@@ -329,11 +402,13 @@ where
         self.memory.as_mut()
     }
 
+    // not inlining this allows copy_from_slice to be inlined here which
+    // ends up eliminating a bunch of bound checks and formatting machinery
+    #[inline(never)]
     pub fn reset(&mut self) {
-        let mut disks = [self.disks[0].take(), self.disks[1].take()];
-        for disk in &mut disks {
-            if let Some(disk) = disk {
-                disk.running_op = None;
+        for slot in &mut self.disk_slots {
+            if let SlotDisk::Present { running_op, .. } = &mut slot.disk {
+                *running_op = None;
             }
         }
         for byte in &mut self.memory.as_mut()[..] {
@@ -343,16 +418,14 @@ where
         self.registers = Registers::default();
         self.instruction_pointer = 0;
         self.event_queue = EventQueue::new();
-        self.disks = disks;
         self.cycles = 0;
         self.time_to_refresh = SCREEN_REFRESH_TIME;
         self.state = CpuState::Running;
-        if let Some(disk) = &mut self.disks[0] {
+        if let SlotDisk::Present { idle_time, .. } = &mut self.disk_slots[0].disk {
             self.memory.as_mut()[..DISK_OP_SIZE].copy_from_slice(
-                &disk.disk.data.as_ref()[..DISK_OP_SIZE],
+                &self.disk_slots[0].data.as_ref()[..DISK_OP_SIZE],
             );
-            disk.running_remaining = DISK_OP_EXTEND;
-            disk.disk.running = true;
+            *idle_time = 0;
         }
     }
 
@@ -382,25 +455,27 @@ where
     fn update_disk(
         disk_id: DiskId,
         memory: &mut [u8; MEMORY_SIZE],
-        disk: &mut PluggedDisk<SD>,
+        slot: &mut DiskSlot<SD>,
     ) -> Option<Event> {
-        if disk.running_op.is_some() {
-            disk.running_remaining = DISK_OP_EXTEND;
-        } else if disk.running_remaining > 0 {
-            disk.running_remaining -= 1;
-        }
-        disk.disk.running = disk.running_remaining > 0;
-        match &mut disk.running_op {
-            Some(DiskOp::Reading { disk_ptr, memory_ptr, remaining, delay }) => {
+        match &mut slot.disk {
+            SlotDisk::Present {
+                running_op: Some(DiskOp::Reading {
+                    disk_ptr,
+                    memory_ptr,
+                    remaining,
+                    delay,
+                }),
+                ..
+            } => {
                 *delay -= 1;
                 if *delay == 0 {
                     *delay = CYCLES_PER_BYTE;
-                    memory[*memory_ptr % memory.len()] = disk.disk.data.as_ref()[*disk_ptr % DISK_SIZE];
+                    memory[*memory_ptr % memory.len()] = slot.data.as_ref()[*disk_ptr % DISK_SIZE];
                     *disk_ptr = disk_ptr.wrapping_add(1);
                     *memory_ptr = memory_ptr.wrapping_add(1);
                     *remaining -= 1;
                     if *remaining == 0 {
-                        disk.running_op = None;
+                        slot.disk.finish_op();
                         Some(Event::disk_finished(disk_id, DiskResult::Ok))
                     } else {
                         None
@@ -409,16 +484,24 @@ where
                     None
                 }
             }
-            Some(DiskOp::Writing { disk_ptr, memory_ptr, remaining, delay }) => {
+            SlotDisk::Present {
+                running_op: Some(DiskOp::Writing {
+                    disk_ptr,
+                    memory_ptr,
+                    remaining,
+                    delay,
+                }),
+                ..
+            } => {
                 *delay -= 1;
                 if *delay == 0 {
                     *delay = CYCLES_PER_BYTE;
-                    disk.disk.data.as_mut()[*disk_ptr % DISK_SIZE] = memory[*memory_ptr % memory.len()];
+                    slot.data.as_mut()[*disk_ptr % DISK_SIZE] = memory[*memory_ptr % memory.len()];
                     *disk_ptr = disk_ptr.wrapping_add(1);
                     *memory_ptr = memory_ptr.wrapping_add(1);
                     *remaining -= 1;
                     if *remaining == 0 {
-                        disk.running_op = None;
+                        slot.disk.finish_op();
                         Some(Event::disk_finished(disk_id, DiskResult::Ok))
                     } else {
                         None
@@ -427,7 +510,11 @@ where
                     None
                 }
             }
-            None => None
+            SlotDisk::Present { idle_time, .. } => {
+                *idle_time = idle_time.saturating_add(1);
+                None
+            }
+            SlotDisk::Missing => None,
         }
     }
 
@@ -441,14 +528,12 @@ where
         self.time_to_refresh -= 1;
 
         for (index, &disk_id) in DISK_IDS.iter().enumerate() {
-            if let Some(disk) = &mut self.disks[index] {
-                if let Some(event) = Self::update_disk(
-                    disk_id,
-                    self.memory.as_mut(),
-                    disk,
-                ) {
-                    self.queue_event(event);
-                }
+            if let Some(event) = Self::update_disk(
+                disk_id,
+                self.memory.as_mut(),
+                &mut self.disk_slots[index],
+            ) {
+                self.queue_event(event);
             }
         }
 
@@ -712,9 +797,10 @@ where
             Instruction::Read(id, memory_ptr, disk_ptr) => {
                 let memory_ptr = usize::from(self.eval(memory_ptr));
                 let disk_ptr = usize::from(self.eval(disk_ptr)) * 16;
-                if let Some(disk) = self.disk_slot_mut(id) {
-                    if disk.running_op.is_none() {
-                        disk.running_op = Some(DiskOp::Reading {
+                if let SlotDisk::Present { running_op, idle_time, .. } = &mut self.disk_slot_mut(id).disk {
+                    if running_op.is_none() {
+                        *idle_time = 0;
+                        *running_op = Some(DiskOp::Reading {
                             memory_ptr,
                             disk_ptr,
                             remaining: DISK_OP_SIZE,
@@ -730,10 +816,11 @@ where
             Instruction::Write(id, memory_ptr, disk_ptr) => {
                 let memory_ptr = usize::from(self.eval(memory_ptr));
                 let disk_ptr = usize::from(self.eval(disk_ptr)) * 16;
-                if let Some(disk) = self.disk_slot_mut(id) {
-                    if disk.running_op.is_none() {
-                        disk.disk.modified = true;
-                        disk.running_op = Some(DiskOp::Writing {
+                if let SlotDisk::Present { running_op, idle_time, modified } = &mut self.disk_slot_mut(id).disk {
+                    if running_op.is_none() {
+                        *modified = true;
+                        *idle_time = 0;
+                        *running_op = Some(DiskOp::Writing {
                             memory_ptr,
                             disk_ptr,
                             remaining: DISK_OP_SIZE,
@@ -749,7 +836,7 @@ where
             Instruction::Invalid => {}
         }
     }
-    
+
     fn decode_register(&mut self, bits: u8) -> Register {
         match bits & 0b111 {
             0b000 => Register::A,
@@ -763,10 +850,17 @@ where
             _ => unreachable!(),
         }
     }
-    
+
     fn decode_operand(&mut self, bits: u8) -> Operand {
         match bits & 0b1111 {
-            0b0000 ..= 0b0111 => Operand::Register(self.decode_register(bits)),
+            0b000 => Operand::Register(Register::A),
+            0b001 => Operand::Register(Register::B),
+            0b010 => Operand::Register(Register::C),
+            0b011 => Operand::Register(Register::D),
+            0b100 => Operand::Register(Register::I),
+            0b101 => Operand::Register(Register::J),
+            0b110 => Operand::Register(Register::P),
+            0b111 => Operand::Register(Register::S),
             0b1000 => Operand::Word(0),
             0b1001 => Operand::Word(1),
             0b1010 => Operand::Word(2),

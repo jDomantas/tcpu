@@ -1,0 +1,11 @@
+[package]
+name = "tcpu-wasm"
+version = "0.1.0"
+authors = ["djade <djadenkus@gmail.com>"]
+edition = "2018"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+tcpu = { path = "../tcpu" }

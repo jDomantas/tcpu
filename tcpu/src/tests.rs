@@ -1,7 +1,7 @@
 use super::*;
 
-fn emulator() -> Emulator<[u8; MEMORY_SIZE], Box<[u8; DISK_SIZE]>, impl Tracer> {
-    Emulator::new([0; MEMORY_SIZE])
+fn emulator() -> Emulator<Memory, DiskMemory, impl Tracer> {
+    Emulator::new()
 }
 
 #[test]
@@ -17,9 +17,7 @@ fn smoke() {
 fn mov() {
     let mut emulator = emulator();
     let code = [
-        0b1000_0000,
-        0b0000_1101,
-        58, // mov a, 58
+        0b1000_0000, 0b0000_1101, 58, // mov a, 58
     ];
     for i in 0..code.len() {
         emulator.memory_mut()[i] = code[i];
@@ -32,8 +30,7 @@ fn mov() {
 fn stack() {
     let mut emulator = emulator();
     let code = [
-        0b0100_1101,
-        53,          // push 53
+        0b0100_1101, 53, // push 53
         0b0011_0010, // pop c
     ];
     for i in 0..code.len() {
@@ -111,8 +108,7 @@ fn event() {
     let code = [
         0b0000_0010, // wait
         0b0000_0000, // nop
-        0b1000_0011,
-        0b0000_0000, // xor a, a
+        0b1000_0011, 0b0000_0000, // xor a, a
     ];
     for i in 0..code.len() {
         emulator.memory_mut()[i] = code[i];
