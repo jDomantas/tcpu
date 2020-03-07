@@ -569,10 +569,6 @@ where
         f(op, Address { operand, offset })
     }
 
-    fn eval<E: Eval>(&self, e: E) -> u16 {
-        e.eval(self)
-    }
-
     fn load(&self, addr: u16) -> u8 {
         self.memory.as_ref()[addr as usize]
     }
@@ -792,8 +788,8 @@ where
     }
 }
 
-trait Eval {
-    fn eval<SM, SD, T>(&self, emulator: &Emulator<SM, SD, T>) -> u16;
+trait Eval<T> {
+    fn eval(&self, expr: T) -> u16;
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -824,9 +820,9 @@ impl fmt::Display for Register {
     }
 }
 
-impl Eval for Register {
-    fn eval<SM, SD, T>(&self, emulator: &Emulator<SM, SD, T>) -> u16 {
-        emulator.registers.get(*self)
+impl<SM, SD, T> Eval<Register> for Emulator<SM, SD, T> {
+    fn eval(&self, register: Register) -> u16 {
+        self.registers.get(register)
     }
 }
 
@@ -845,10 +841,10 @@ impl fmt::Display for Operand {
     }
 }
 
-impl Eval for Operand {
-    fn eval<SM, SD, T>(&self, emulator: &Emulator<SM, SD, T>) -> u16 {
-        match *self {
-            Operand::Register(r) => r.eval(emulator),
+impl<SM, SD, T> Eval<Operand> for Emulator<SM, SD, T> {
+    fn eval(&self, operand: Operand) -> u16 {
+        match operand {
+            Operand::Register(r) => self.eval(r),
             Operand::Word(w) => w,
         }
     }
@@ -870,9 +866,9 @@ impl fmt::Display for Address {
     }
 }
 
-impl Eval for Address {
-    fn eval<SM, SD, T>(&self, emulator: &Emulator<SM, SD, T>) -> u16 {
-        self.operand.eval(emulator).wrapping_add(self.offset)
+impl<SM, SD, T> Eval<Address> for Emulator<SM, SD, T> {
+    fn eval(&self, address: Address) -> u16 {
+        self.eval(address.operand).wrapping_add(address.offset)
     }
 }
 
