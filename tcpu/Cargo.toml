@@ -8,6 +8,9 @@ edition = "2018"
 
 [dev-dependencies]
 criterion = "0.3"
+metrohash = "1.0.6"
+rand_xoshiro = "0.4.0"
+rand = "0.7.3"
 
 [[bench]]
 name = "bench"

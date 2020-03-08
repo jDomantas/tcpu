@@ -1,0 +1,99 @@
+--- Instructions -----------------------------+-------------------------
+name            | encoding                    | effect
+----------------+-----------------------------+-------------------------
+nop             | 0000 0000                   |
+ret             | 0000 0001                   | S += 2; IP = *S
+wait            | 0000 0010                   | wait for event
+poll            | 0000 0011                   | poll for event
+halt            | 0000 0100                   | cpu shuts down
+not a           | 0001 0aaa                   | a = ~a
+neg a           | 0010 0aaa                   | a = -a
+pop a           | 0011 0aaa                   | S += 2; a = *S
+push a          | 0100 aaaa                   | *S = a; S -= 2;
+jmp a           | 0101 aaaa                   | IP = a
+call a          | 0110 aaaa                   | *S = IP; IP = a; S -= 2;
+mov a, b        | 1000 0000 0aaa bbbb         | a = b
+add a, b        | 1000 0001 0aaa bbbb         | a += b
+sub a, b        | 1000 0010 0aaa bbbb         | a -= b
+xor a, b        | 1000 0011 0aaa bbbb         | a ^= b
+and a, b        | 1000 0100 0aaa bbbb         | a &= b
+or a, b         | 1000 0101 0aaa bbbb         | a |= b
+shl a, b        | 1000 0110 0aaa bbbb         | a <<= b
+shr a, b        | 1000 0111 0aaa bbbb         | a >>= b
+cmp a, b        | 1000 1000 0aaa bbbb         | a = sign(a - b)
+load a, b       | 1001 0000 0aaa bbbb         | a = *b
+load a, b + o   | 1001 0001 0aaa bbbb o o     | a = *(b + zero_extend(o))
+load a, b + o   | 1001 0010 0aaa bbbb o o o o | a = *(b + o)
+loadw a, b      | 1001 0100 0aaa bbbb         | a = *b
+loadw a, b + o  | 1001 0101 0aaa bbbb o o     | a = *(b + zero_extend(o))
+loadw a, b + o  | 1001 0110 0aaa bbbb o o o o | a = *(b + o)
+store a, b      | 1001 1000 aaaa bbbb         | *b = a
+store a, b + o  | 1001 1001 aaaa bbbb o o     | *(b + o) = a
+store a, b + o  | 1001 1010 aaaa bbbb o o o o | *(b + o) = a
+storew a, b     | 1001 1100 aaaa bbbb         | *b = a
+storew a, b + o | 1001 1101 aaaa bbbb o o     | *(b + o) = a
+storew a, b + o | 1001 1110 aaaa bbbb o o o o | *(b + o) = a
+jez a, b        | 1010 0000 0aaa bbbb         | if a == 0: IP = b
+jnz a, b        | 1010 0001 0aaa bbbb         | if a != 0: IP = b
+jl a, b         | 1010 0010 0aaa bbbb         | if a == 0xffff: IP = b
+jg a, b         | 1010 0011 0aaa bbbb         | if a == 0x0001: IP = b
+jle a, b        | 1010 0100 0aaa bbbb         | if a != 0x0001: IP = b
+jge a, b        | 1010 0101 0aaa bbbb         | if a != 0xffff: IP = b
+read d, a, b    | 1111 000d aaaa bbbb         | read(d, a, b)
+write d, a, b   | 1111 100d aaaa bbbb         | write(d, a, b)
+----------------+-----------------------------+-------------------------
+
+
+--- Operands -------
+encoding | name
+---------+----------
+0000     | A
+0001     | B
+0010     | C
+0011     | D
+0100     | I
+0101     | J
+0110     | P
+0111     | S
+1000     | 0x0000
+1001     | 0x0001
+1010     | 0x0002
+1011     | 0x0003
+1100     | 0x0004
+1101     | next byte
+1110     | next word
+1111     | 0xffff
+---------+----------
+
+
+--- Events ---------+-----------
+A | name            | B
+--+-----------------+-----------
+0 | -               | -
+1 | key up          | key
+2 | key down        | key
+3 | screen refresh  | -
+4 | disk 0 finished | error code
+5 | disk 1 finished | error code
+--+-----------------+-----------
+
+
+--- Disk error codes ----
+code | error
+-----+-------------------
+0    | -
+1    | disk not present
+2    | disk busy
+3    | disk not writeable
+-----+-------------------
+
+
+--- Disk operations ----
+
+read(d, a, b)
+    Copies disk d range [b * 16; b * 16 + 0xfff]
+    to memory range [a; a + 0xfff]
+
+write(d, a, b)
+    Copies memory range [a; a + 0xfff]
+    to disk d range [b * 16; b * 16 + 0xfff]

@@ -151,7 +151,6 @@ enum DiskOp {
 }
 
 #[derive(PartialEq, Eq, Debug, Hash, Copy, Clone)]
-#[non_exhaustive]
 pub enum DiskId {
     D0,
     D1,
@@ -233,6 +232,7 @@ impl<S> DiskSlot<S> {
 enum CpuState {
     Running,
     Waiting,
+    Halted,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -274,7 +274,7 @@ impl Registers {
         }
     }
 
-    fn set(&mut self, reg: Register, value: u16) {
+    pub fn set(&mut self, reg: Register, value: u16) {
         *self.get_mut(reg) = value;
     }
     
@@ -396,6 +396,10 @@ where
 
     pub fn screen(&self) -> &[[u8; SCREEN_WIDTH]; SCREEN_HEIGHT] {
         &self.screen
+    }
+
+    pub fn memory(&self) -> &[u8; MEMORY_SIZE] {
+        self.memory.as_ref()
     }
 
     pub fn memory_mut(&mut self) -> &mut [u8; MEMORY_SIZE] {
@@ -538,7 +542,7 @@ where
         }
 
         self.cycles += 1;
-        
+
         if self.state == CpuState::Waiting {
             if let Some(event) = self.event_queue.pop() {
                 self.registers.a = event.id;
@@ -573,6 +577,7 @@ where
             0b0000_0001 => Instruction::Ret,
             0b0000_0010 => Instruction::Wait,
             0b0000_0011 => Instruction::Poll,
+            0b0000_0100 => Instruction::Halt,
             0b1000_0000 => self.register_operand(Instruction::Mov),
             0b1000_0001 => self.register_operand(Instruction::Add),
             0b1000_0010 => self.register_operand(Instruction::Sub),
@@ -691,6 +696,7 @@ where
                     self.registers.b = 0;
                 }
             }
+            Instruction::Halt => self.state = CpuState::Halted,
             Instruction::Not(a) => self.registers.set(a, !self.eval(a)),
             Instruction::Neg(a) => self.registers.set(a, self.eval(a).wrapping_neg()),
             Instruction::Pop(a) => {
@@ -972,6 +978,7 @@ pub enum Instruction {
     Ret,
     Wait,
     Poll,
+    Halt,
     Not(Register),
     Neg(Register),
     Pop(Register),
@@ -1009,6 +1016,7 @@ impl fmt::Display for Instruction {
             Instruction::Ret => write!(f, "ret"),
             Instruction::Wait => write!(f, "wait"),
             Instruction::Poll => write!(f, "poll"),
+            Instruction::Halt => write!(f, "halt"),
             Instruction::Not(a) => write!(f, "not {}", a),
             Instruction::Neg(a) => write!(f, "neg {}", a),
             Instruction::Pop(a) => write!(f, "pop {}", a),
