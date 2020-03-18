@@ -117,6 +117,10 @@ export! {
         tcpu::SCREEN_HEIGHT as u32
     }
 
+    fn is_running(data: &mut RuntimeData) -> bool {
+        data.emulator.is_running()
+    }
+
     fn disk_stats(data: &mut RuntimeData, id: u32) -> u32 {
         let disk_id = id.try_into().unwrap_or_else(|_| abort("invalid disk id"));
         let stats = if let Some(disk) = data.emulator.disk(disk_id) {

@@ -1,0 +1,12 @@
+{
+  "name": "tcpu",
+  "version": "1.0.0",
+  "description": "",
+  "main": "src/index.ts",
+  "devDependencies": {
+    "typescript": "^3.8.3"
+  },
+  "scripts": {},
+  "author": "",
+  "license": "MIT"
+}

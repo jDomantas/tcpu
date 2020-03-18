@@ -1,0 +1,22 @@
+{
+    "compilerOptions": {
+        "target": "ES2015",
+        "module": "system",
+        "lib": ["ES2015", "DOM"],
+        "sourceMap": true,
+        "outFile": "./target/web/index.js",
+        "strict": true,
+        "noImplicitAny": true,
+        "strictNullChecks": true,
+        "strictFunctionTypes": true,
+        "strictPropertyInitialization": true,
+        "noImplicitThis": true,
+        "alwaysStrict": true,
+        "moduleResolution": "node",
+        "baseUrl": "./web",
+        "esModuleInterop": true
+    },
+    "include": [
+        "web/**/*.ts"
+    ]
+}

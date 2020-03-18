@@ -36,3 +36,20 @@ pub fn compile_emulator() -> Result<Vec<u8>, Box<dyn Error>> {
 
     Ok(wasm)
 }
+
+pub fn compile_js() -> Result<Vec<u8>, Box<dyn Error>> {
+    let output = Command::new("node")
+        .arg("./node_modules/typescript/bin/tsc")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .output()?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+        return Err(CompileError { stderr }.into());
+    }
+
+    let js = std::fs::read("./target/web/index.js")?;
+
+    Ok(js)
+}

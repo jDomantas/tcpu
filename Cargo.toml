@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "dev-server",
     "tcpu",
     "tcpu-wasm",
     "wasm-builder",

@@ -406,6 +406,10 @@ where
         self.memory.as_mut()
     }
 
+    pub fn is_running(&self) -> bool {
+        self.state != CpuState::Halted
+    }
+
     // not inlining this allows copy_from_slice to be inlined here which
     // ends up eliminating a bunch of bound checks and formatting machinery
     #[inline(never)]
