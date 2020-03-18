@@ -1,5 +1,7 @@
 const diskSize = 1 << 20;
 const processorRate = 1024 * 1024 * 1.5;
+// active disk light remains lit for 0.5 s after disk became idle
+const diskActiveLightTime = processorRate / 2;
 
 class Disk {
     public label: string;
@@ -22,7 +24,7 @@ class Disk {
     }
 }
 
-class PluggedDisk {
+class InsertedDisk {
     public disk: Disk;
     public working: boolean;
     public modified: boolean;
@@ -37,7 +39,7 @@ class PluggedDisk {
 class Emulator {
     public wasm: WebAssembly.Instance;
     public keys: {[key: string]: boolean};
-    public slots: (PluggedDisk | null)[];
+    public slots: (InsertedDisk | null)[];
     public timeBudget: number;
 
     constructor(wasm: WebAssembly.Instance) {
@@ -45,6 +47,7 @@ class Emulator {
         this.keys = {};
         this.slots = [null, null];
         this.timeBudget = 0;
+        (this.wasm.exports.initialize as any)();
     }
 
     public reset() {
@@ -58,13 +61,13 @@ class Emulator {
         this.timeBudget -= cycleTime;
         (this.wasm.exports.run as any)(cycles);
         for (let disk = 0; disk < 2; disk++) {
-            const diskStatus = (this.wasm.exports.disk_stats as any)(disk);
-            const modified = ((diskStatus >> 1) & 1) != 0;
-            const working = (diskStatus >> 2) <= processorRate / 2;
             const slot = this.slots[disk];
             if (slot !== null) {
+                const diskStatus = (this.wasm.exports.disk_stats as any)(disk);
+                const modified = ((diskStatus >> 1) & 1) != 0;
+                const idleTime = diskStatus >> 2;
                 slot.modified = modified;
-                slot.working = working;
+                slot.working = idleTime <= diskActiveLightTime;
             }
         }
     }
@@ -119,10 +122,10 @@ class Emulator {
         if (index !== 0 && index !== 1) {
             throw new Error(`disk index ${index} is not valid`);
         }
-        const plugged = new PluggedDisk(disk);
+        const inserted = new InsertedDisk(disk);
         const buffer = this.diskBuffer(index);
         buffer.set(disk.data);
-        this.slots[index] = plugged;
+        this.slots[index] = inserted;
         (this.wasm.exports.insert_disk as any)(index);
     }
 
@@ -261,7 +264,7 @@ function main(wasm: WebAssembly.WebAssemblyInstantiatedSource) {
             pixels[i * 4 + 3] = 255;
         }
         ctx.putImageData(imageData, 0, 0);
-        diskManager.updatePluggedDisks();
+        diskManager.updateInsertedDisks();
         
         window.requestAnimationFrame(frame);
     }
@@ -277,16 +280,6 @@ function main(wasm: WebAssembly.WebAssemblyInstantiatedSource) {
         diskManager.libraryDisks.push(disk);
         diskManager.disksChanged();
     };
-}
-
-class DbManager {
-    constructor() {
-        
-    }
-
-    saveDisks(disks: Disk[]) {
-        
-    }
 }
 
 class DiskManager {
@@ -317,8 +310,8 @@ class DiskManager {
             }
             let draggedDiskIndex = null;
             for (let i = 0; i < this.emulator.slots.length; i++) {
-                const pluggedDisk = this.emulator.slots[i];
-                if (pluggedDisk && pluggedDisk.disk == this.draggedDisk) {
+                const insertedDisk = this.emulator.slots[i];
+                if (insertedDisk && insertedDisk.disk == this.draggedDisk) {
                     draggedDiskIndex = i;
                     break;
                 }
@@ -363,11 +356,11 @@ class DiskManager {
         this.trash.ondrop = e => {
             e.preventDefault();
             for (let i = 0; i < this.emulator.slots.length; i++) {
-                const pluggedDisk = this.emulator.slots[i];
-                if (!pluggedDisk) {
+                const insertedDisk = this.emulator.slots[i];
+                if (!insertedDisk) {
                     continue;
                 }
-                const disk = pluggedDisk.disk;
+                const disk = insertedDisk.disk;
                 if (disk == this.draggedDisk) {
                     this.draggedDisk = null;
                     this.emulator.removeDisk(i);
@@ -396,7 +389,7 @@ class DiskManager {
         return d;
     }
 
-    fillSlotElement(slot: HTMLElement, disk: Disk, pluggedIndex: number | null) {
+    fillSlotElement(slot: HTMLElement, disk: Disk, slotIndex: number | null) {
         slot.ondblclick = null;
         slot.ondragstart = null;
         slot.ondragend = null;
@@ -440,8 +433,8 @@ class DiskManager {
         downloadSvg.appendChild(downloadPolyline);
         downloadButton.appendChild(downloadSvg);
         downloadButton.onclick = () => {
-            if (pluggedIndex !== null) {
-                this.emulator.updateDiskContents(pluggedIndex);
+            if (slotIndex !== null) {
+                this.emulator.updateDiskContents(slotIndex);
             }
             const filename = disk.label + '.bin';
             const blob = new Blob([disk.data], {type: 'application/octet-stream'});
@@ -509,30 +502,30 @@ class DiskManager {
             this.library.appendChild(elem);
         }
         for (let i = 0; i < 2; i++) {
-            let plugged = this.emulator.slots[i];
-            if (plugged === null) {
+            let slot = this.emulator.slots[i];
+            if (slot === null) {
                 this.slots[i].className = 'slot diskLike';
                 this.prepEmptySlot(this.slots[i], i);
             } else {
                 this.slots[i].className = 'disk diskLike';
-                this.fillSlotElement(this.slots[i], plugged.disk, i);
+                this.fillSlotElement(this.slots[i], slot.disk, i);
             }
         }
     }
 
-    updatePluggedDisks() {
+    updateInsertedDisks() {
         for (let i = 0; i < 2; i++) {
-            let plugged = this.emulator.slots[i];
-            if (plugged !== null) {
+            let slot = this.emulator.slots[i];
+            if (slot !== null) {
                 const workingIndicator = this.slots[i].firstChild as any;
-                const workingClass = plugged.working
+                const workingClass = slot.working
                     ? 'indicator working active'
                     : 'indicator working';
                 if (workingIndicator.className != workingClass) {
                     workingIndicator.className = workingClass;
                 }
                 const modifiedIndicator = workingIndicator.nextSibling;
-                const modifiedClass = plugged.modified
+                const modifiedClass = slot.modified
                     ? 'indicator modified active'
                     : 'indicator modified';
                 if (modifiedIndicator.className != modifiedClass) {

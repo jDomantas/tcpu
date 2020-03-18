@@ -90,7 +90,8 @@ impl DiskStats {
     }
     
     fn as_bits(&self) -> u32 {
-        (core::cmp::min(self.idle_time, u32::max_value() >> 2) << 2) |
+        // js runtime interprets return type as i32
+        (core::cmp::min(self.idle_time, u32::max_value() >> 3) << 2) |
         (u32::from(self.modified) << 1) |
         u32::from(self.present)
     }
