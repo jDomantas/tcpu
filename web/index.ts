@@ -320,7 +320,7 @@ class OpenedLocalDb implements DiskDb {
         const request = this.db
             .transaction(['disks'], 'readwrite')
             .objectStore('disks')
-            .delete(disk.label);
+            .delete(disk.id);
         return new Promise((resolve, reject) => {
             request.onsuccess = () => resolve();
             request.onerror = (e: any) => reject(e);
