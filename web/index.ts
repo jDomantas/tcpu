@@ -226,7 +226,7 @@ function main(wasm: WebAssembly.WebAssemblyInstantiatedSource) {
     const emulatorScreenSize = emulator.screenSize();
     const renderer = new Renderer(emulatorScreenSize);
 
-    const db = new NullDb();
+    const db = new LocalDb();
 
     (window as any).emulator = emulator;
 
@@ -308,6 +308,84 @@ class NullDb implements DiskDb {
 
     public getDisks(): Promise<Disk[]> {
         return new Promise((resolve, _) => resolve([]));
+    }
+}
+
+class OpenedLocalDb implements DiskDb {
+    private db: IDBDatabase;
+
+    constructor(db: IDBDatabase) {
+        this.db = db;
+    }
+
+    public saveDisk(disk: Disk): Promise<void> {
+        const request = this.db
+            .transaction(['disks'], 'readwrite')
+            .objectStore('disks')
+            .put(disk);
+        return new Promise((resolve, reject) => {
+            request.onsuccess = () => resolve();
+            request.onerror = (e: any) => reject(e);
+        });
+    }
+
+    public deleteDisk(disk: Disk): Promise<void> {
+        const request = this.db
+            .transaction(['disks'], 'readwrite')
+            .objectStore('disks')
+            .delete(disk.label);
+        return new Promise((resolve, reject) => {
+            request.onsuccess = () => resolve();
+            request.onerror = (e: any) => reject(e);
+        });
+    }
+
+    public getDisks(): Promise<Disk[]> {
+        const request = this.db
+            .transaction(['disks'])
+            .objectStore('disks')
+            .openCursor();
+        return new Promise((resolve, reject) => {
+            const disks: Disk[] = [];
+            request.onsuccess = (e: any) => {
+                const cursor = e.target.result;
+                if (cursor) {
+                    disks.push(cursor.value);
+                    cursor.continue();
+                } else {
+                    resolve(disks);
+                }
+            };
+            request.onerror = (e: any) => reject(e);
+        });
+    }
+}
+
+class LocalDb implements DiskDb {
+    private db: Promise<OpenedLocalDb>;
+
+    constructor() {
+        const request = indexedDB.open('disk-db', 2);
+        request.onupgradeneeded = (e: any) => {
+            const db = e.target.result;
+            db.createObjectStore('disks', { keyPath: 'label' });
+        };
+        this.db = new Promise((resolve, reject) => {
+            request.onsuccess = (e: any) => resolve(new OpenedLocalDb(e.target.result));
+            request.onerror = reject;
+        });
+    }
+
+    public saveDisk(disk: Disk): Promise<void> {
+        return this.db.then(db => db.saveDisk(disk));
+    }
+
+    public deleteDisk(disk: Disk): Promise<void> {
+        return this.db.then(db => db.deleteDisk(disk));
+    }
+
+    public getDisks(): Promise<Disk[]> {
+        return this.db.then(db => db.getDisks());
     }
 }
 
