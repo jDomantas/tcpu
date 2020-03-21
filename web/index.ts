@@ -149,6 +149,7 @@ class Emulator {
         this.slots[index] = null;
         const buffer = this.diskBuffer(index);
         disk.data.set(buffer);
+        (this.wasm.exports.remove_disk as any)(index);
         return disk;
     }
 
@@ -536,7 +537,6 @@ class App {
         if (dragged.place === 'library') {
             return;
         } else if (dragged.place === 'slot') {
-            this.emulator.updateDiskContents(draggedIndex);
             const disk = this.emulator.slots[draggedIndex];
             if (!disk) {
                 return;
