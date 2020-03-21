@@ -576,67 +576,75 @@ where
 
     fn decode_instruction(&mut self) -> Instruction {
         let x = self.read_byte();
+        let (ro_1, ro_2, ro_s) = self.register_operand();
+        let (oo_1, oo_2, oo_s) = self.two_operands();
+        let r = self.decode_register(x);
+        let (o, o_s) = self.one_operand(x);
         match x {
             0b0000_0000 => Instruction::Nop,
             0b0000_0001 => Instruction::Ret,
             0b0000_0010 => Instruction::Wait,
             0b0000_0011 => Instruction::Poll,
             0b0000_0100 => Instruction::Halt,
-            0b1000_0000 => self.register_operand(Instruction::Mov),
-            0b1000_0001 => self.register_operand(Instruction::Add),
-            0b1000_0010 => self.register_operand(Instruction::Sub),
-            0b1000_0011 => self.register_operand(Instruction::Xor),
-            0b1000_0100 => self.register_operand(Instruction::And),
-            0b1000_0101 => self.register_operand(Instruction::Or),
-            0b1000_0110 => self.register_operand(Instruction::Shl),
-            0b1000_0111 => self.register_operand(Instruction::Shr),
-            0b1000_1000 => self.register_operand(Instruction::Cmp),
+            0b1000_0000 => { self.instruction_pointer = ro_s; Instruction::Mov(ro_1, ro_2) }
+            0b1000_0001 => { self.instruction_pointer = ro_s; Instruction::Add(ro_1, ro_2) }
+            0b1000_0010 => { self.instruction_pointer = ro_s; Instruction::Sub(ro_1, ro_2) }
+            0b1000_0011 => { self.instruction_pointer = ro_s; Instruction::Xor(ro_1, ro_2) }
+            0b1000_0100 => { self.instruction_pointer = ro_s; Instruction::And(ro_1, ro_2) }
+            0b1000_0101 => { self.instruction_pointer = ro_s; Instruction::Or(ro_1, ro_2) }
+            0b1000_0110 => { self.instruction_pointer = ro_s; Instruction::Shl(ro_1, ro_2) }
+            0b1000_0111 => { self.instruction_pointer = ro_s; Instruction::Shr(ro_1, ro_2) }
+            0b1000_1000 => { self.instruction_pointer = ro_s; Instruction::Cmp(ro_1, ro_2) }
             0b1001_0000 ..= 0b1001_0010 => self.decode_load(x, Instruction::Load),
             0b1001_0100 ..= 0b1001_0110 => self.decode_load(x, Instruction::Loadw),
             0b1001_1000 ..= 0b1001_1010 => self.decode_store(x, Instruction::Store),
             0b1001_1100 ..= 0b1001_1110 => self.decode_store(x, Instruction::Storew),
-            0b0001_0000 ..= 0b0001_0111 => self.one_register(x, Instruction::Not),
-            0b0010_0000 ..= 0b0010_0111 => self.one_register(x, Instruction::Neg),
-            0b0011_0000 ..= 0b0011_0111 => self.one_register(x, Instruction::Pop),
-            0b0100_0000 ..= 0b0100_1111 => self.one_operand(x, Instruction::Push),
-            0b0101_0000 ..= 0b0101_1111 => self.one_operand(x, Instruction::Jmp),
-            0b0110_0000 ..= 0b0110_1111 => self.one_operand(x, Instruction::Call),
-            0b1010_0000 => self.register_operand(Instruction::Jez),
-            0b1010_0001 => self.register_operand(Instruction::Jnz),
-            0b1010_0010 => self.register_operand(Instruction::Jl),
-            0b1010_0011 => self.register_operand(Instruction::Jg),
-            0b1010_0100 => self.register_operand(Instruction::Jle),
-            0b1010_0101 => self.register_operand(Instruction::Jge),
-            0b1111_0000 => self.two_operands(|a, b| Instruction::Read(DiskId::D0, a, b)),
-            0b1111_0001 => self.two_operands(|a, b| Instruction::Read(DiskId::D1, a, b)),
-            0b1111_1000 => self.two_operands(|a, b| Instruction::Write(DiskId::D0, a, b)),
-            0b1111_1001 => self.two_operands(|a, b| Instruction::Write(DiskId::D1, a, b)),
+            0b0001_0000 ..= 0b0001_0111 => Instruction::Not(r),
+            0b0010_0000 ..= 0b0010_0111 => Instruction::Neg(r),
+            0b0011_0000 ..= 0b0011_0111 => Instruction::Pop(r),
+            0b0100_0000 ..= 0b0100_1111 => { self.instruction_pointer = o_s; Instruction::Push(o) }
+            0b0101_0000 ..= 0b0101_1111 => { self.instruction_pointer = o_s; Instruction::Jmp(o) }
+            0b0110_0000 ..= 0b0110_1111 => { self.instruction_pointer = o_s; Instruction::Call(o) }
+            0b1010_0000 => { self.instruction_pointer = ro_s; Instruction::Jez(ro_1, ro_2) }
+            0b1010_0001 => { self.instruction_pointer = ro_s; Instruction::Jnz(ro_1, ro_2) }
+            0b1010_0010 => { self.instruction_pointer = ro_s; Instruction::Jl(ro_1, ro_2) }
+            0b1010_0011 => { self.instruction_pointer = ro_s; Instruction::Jg(ro_1, ro_2) }
+            0b1010_0100 => { self.instruction_pointer = ro_s; Instruction::Jle(ro_1, ro_2) }
+            0b1010_0101 => { self.instruction_pointer = ro_s; Instruction::Jge(ro_1, ro_2) }
+            0b1111_0000 => { self.instruction_pointer = oo_s; Instruction::Read(DiskId::D0, oo_1, oo_2) }
+            0b1111_0001 => { self.instruction_pointer = oo_s; Instruction::Read(DiskId::D1, oo_1, oo_2) }
+            0b1111_1000 => { self.instruction_pointer = oo_s; Instruction::Write(DiskId::D0, oo_1, oo_2) }
+            0b1111_1001 => { self.instruction_pointer = oo_s; Instruction::Write(DiskId::D1, oo_1, oo_2) }
             _ => Instruction::Invalid,
         }
     }
 
-    fn one_register(&mut self, x: u8, f: impl FnOnce(Register) -> Instruction) -> Instruction {
-        let register = self.decode_register(x & 0b111);
-        f(register)
-    }
-
-    fn one_operand(&mut self, x: u8, f: impl FnOnce(Operand) -> Instruction) -> Instruction {
+    fn one_operand(&mut self, x: u8) -> (Operand, u16) {
+        let old_ip = self.instruction_pointer;
         let operand = self.decode_operand(x & 0b1111);
-        f(operand)
+        let ip = self.instruction_pointer;
+        self.instruction_pointer = old_ip;
+        (operand, ip)
     }
 
-    fn register_operand(&mut self, f: impl FnOnce(Register, Operand) -> Instruction) -> Instruction {
+    fn register_operand(&mut self) -> (Register, Operand, u16) {
+        let old_ip = self.instruction_pointer;
         let x = self.read_byte();
         let reg = self.decode_register((x >> 4) & 0b111);
         let op = self.decode_operand(x & 0b1111);
-        f(reg, op)
+        let ip = self.instruction_pointer;
+        self.instruction_pointer = old_ip;
+        (reg, op, ip)
     }
 
-    fn two_operands(&mut self, f: impl FnOnce(Operand, Operand) -> Instruction) -> Instruction {
+    fn two_operands(&mut self) -> (Operand, Operand, u16) {
+        let old_ip = self.instruction_pointer;
         let x = self.read_byte();
         let op1 = self.decode_operand((x >> 4) & 0b1111);
         let op2 = self.decode_operand(x & 0b1111);
-        f(op1, op2)
+        let ip = self.instruction_pointer;
+        self.instruction_pointer = old_ip;
+        (op1, op2, ip)
     }
 
     fn decode_load(&mut self, b: u8, f: impl FnOnce(Register, Address) -> Instruction) -> Instruction {
