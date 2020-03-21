@@ -5,22 +5,30 @@ const diskActiveLightTime = processorRate / 2;
 
 class Disk {
     public label: string;
-    public readonly: boolean;
     public data: Uint8Array;
 
-    constructor(label: string, readonly: boolean, data?: Uint8Array) {
+    constructor(label: string, data?: Uint8Array) {
         this.label = label;
-        this.readonly = readonly ? true : false;
         this.data = data ? data : new Uint8Array(diskSize);
     }
 
     copy() {
-        const disk = new Disk(this.label, this.readonly);
-        disk.readonly = this.readonly;
+        const disk = new Disk(this.label);
         for (let i = 0; i < diskSize; i++) {
             disk.data[i] = this.data[i];
         }
         return disk;
+    }
+
+    isSame(other: Disk): boolean {
+        const a = this.data;
+        const b = other.data;
+        for (let i = 0; i < diskSize; i++) {
+            if (a[i] !== b[i]) {
+                return false;
+            }
+        }
+        return true;
     }
 }
 
@@ -37,10 +45,10 @@ class InsertedDisk {
 }
 
 class Emulator {
-    public wasm: WebAssembly.Instance;
-    public keys: {[key: string]: boolean};
+    private wasm: WebAssembly.Instance;
+    private keys: {[key: string]: boolean};
+    private timeBudget: number;
     public slots: (InsertedDisk | null)[];
-    public timeBudget: number;
 
     constructor(wasm: WebAssembly.Instance) {
         this.wasm = wasm;
@@ -64,7 +72,7 @@ class Emulator {
             const slot = this.slots[disk];
             if (slot !== null) {
                 const diskStatus = (this.wasm.exports.disk_stats as any)(disk);
-                const modified = ((diskStatus >> 1) & 1) != 0;
+                const modified = ((diskStatus >> 1) & 1) !== 0;
                 const idleTime = diskStatus >> 2;
                 slot.modified = modified;
                 slot.working = idleTime <= diskActiveLightTime;
@@ -80,7 +88,7 @@ class Emulator {
         return new Uint8Array(memory, ptr, pixels);
     }
 
-    public screenSize() {
+    public screenSize(): { width: number, height: number } {
         return {
             width: (this.wasm.exports.screen_width as any)(),
             height: (this.wasm.exports.screen_height as any)(),
@@ -155,6 +163,13 @@ class Emulator {
         const buffer = this.diskBuffer(index);
         slots.disk.data.set(buffer);
     }
+
+    public logMessage(ptr: number, len: number) {
+        const buffer = (this.wasm.exports.memory as any).buffer;
+        const messageBuffer = new Uint8Array(buffer, ptr, len);
+        var message = new TextDecoder("utf-8").decode(messageBuffer);
+        console.log(`emulator log: ${message}`);
+    }
 }
 
 function getColor(r: number, g: number, b: number) {
@@ -184,20 +199,13 @@ for (let i = 0; i < 256; i++) {
     colorPalette[i] = (color.r << 16) | (color.g << 8) | (color.b << 0);
 }
 
-function logMessage(emulator: Emulator, ptr: number, len: number) {
-    const buffer = (emulator.wasm.exports.memory as any).buffer;
-    const messageBuffer = new Uint8Array(buffer, ptr, len);
-    var message = new TextDecoder("utf-8").decode(messageBuffer);
-    console.log(`emulator log: ${message}`);
-}
-
-let logEmulatorHack: Emulator | null;
+let logCallback: ((ptr: number, len: number) => void) | undefined;
 
 const imports = {
     env: {
         log_message: (ptr: number, len: number) => {
-            if (logEmulatorHack) {
-                logMessage(logEmulatorHack, ptr, len);
+            if (logCallback) {
+                logCallback(ptr, len);
             } else {
                 console.log('cannot log message from emulator');
             }
@@ -213,183 +221,407 @@ function onLoad() {
 
 function main(wasm: WebAssembly.WebAssemblyInstantiatedSource) {
     const emulator = new Emulator(wasm.instance);
-    logEmulatorHack = emulator;
+    logCallback = (ptr, len) => emulator.logMessage(ptr, len);
 
-    document.getElementById('reset')!.onclick = () => emulator.reset();
+    const emulatorScreenSize = emulator.screenSize();
+    const renderer = new Renderer(emulatorScreenSize);
 
-    window.addEventListener('keydown', (e) => {
-        emulator.keyDown(e.which);
+    const db = new NullDb();
+
+    (window as any).emulator = emulator;
+
+    const app = new App(renderer, emulator, db);
+
+    document.getElementById('reset')!.onclick = () => app.clickedReset();
+
+    window.addEventListener('keydown', e => {
         if (e.which >= 37 && e.which <= 40) {
             e.preventDefault();
         }
+        app.keyDown(e.which);
     });
-    window.addEventListener('keyup', (e) => {
-        emulator.keyUp(e.which);
-        e.preventDefault();
+    window.addEventListener('keyup', e => {
+        if (e.which >= 37 && e.which <= 40) {
+            e.preventDefault();
+        }
+        app.keyUp(e.which);
     });
-    window.addEventListener('blur', (e) => {
-        emulator.resetKeys();
+    window.addEventListener('blur', _ => {
+        app.blur();
     });
-
-    const diskManager = new DiskManager(emulator);
-    diskManager.disksChanged();
-
-    const canvas = document.getElementById('screen') as any;
-    const screenSize = emulator.screenSize();
-    canvas.width = screenSize.width;
-    canvas.height = screenSize.height;
-    const ctx = canvas.getContext('2d');
-    const imageData = ctx.createImageData(screenSize.width, screenSize.height);
 
     let lastTime = performance.now();
 
     function frame() {
         const currentTime = performance.now();
         const delta = Math.max(0, (currentTime - lastTime) / 1000);
-        if (delta > 0.2) {
-            console.log(`${delta} seconds behind`);
-        } else {
-            emulator.run(delta);
-        }
         lastTime = currentTime;
-        const screenBuffer = emulator.screen();
-        const pixels = imageData.data;
-        const pixelCount = screenSize.width * screenSize.height;
-        for (let i = 0; i < pixelCount; i++) {
-            const byte = screenBuffer[i];
-            const color = colorPalette[byte];
-            pixels[i * 4 + 0] = (color >> 16) & 0xff;
-            pixels[i * 4 + 1] = (color >> 8) & 0xff;
-            pixels[i * 4 + 2] = (color >> 0) & 0xff;
-            pixels[i * 4 + 3] = 255;
-        }
-        ctx.putImageData(imageData, 0, 0);
-        diskManager.updateInsertedDisks();
-        
+        app.frame(delta);
         window.requestAnimationFrame(frame);
     }
 
     window.requestAnimationFrame(frame);
 
-    (window as any).importDisk = (data: number[]) => {
-        const disk = new Disk('imported', false);
-        const len = Math.min(diskSize, data.length);
-        for (let i = 0; i < len; i++) {
-            disk.data[i] = data[i] & 0xff;
-        }
-        diskManager.libraryDisks.push(disk);
-        diskManager.disksChanged();
-    };
+    // (window as any).importDisk = (data: number[]) => {
+    //     const disk = new Disk('imported');
+    //     const len = Math.min(diskSize, data.length);
+    //     for (let i = 0; i < len; i++) {
+    //         disk.data[i] = data[i] & 0xff;
+    //     }
+    //     diskManager.libraryDisks.push(disk);
+    //     diskManager.disksChanged();
+    // };
 }
 
-class DiskManager {
+type LibraryDiskState = 'ok' | 'saving' | 'deleting' | 'failed';
+
+class LibraryDisk {
+    public disk: Disk;
+    public state: LibraryDiskState;
+
+    constructor(disk: Disk, state: LibraryDiskState) {
+        this.disk = disk;
+        this.state = state;
+    }
+
+    public canInteract(): boolean {
+        return this.state === 'ok' || this.state === 'failed';
+    }
+}
+
+type LocatedDisk = { disk: Disk, place: 'library' | 'slot' };
+
+interface DiskDb {
+    deleteDisk(disk: Disk): Promise<void>;
+    saveDisk(disk: Disk): Promise<void>;
+    getDisks(): Promise<Disk[]>;
+}
+
+class NullDb implements DiskDb {
+    public deleteDisk(disk: Disk): Promise<void> {
+        return new Promise((resolve, _) => resolve());
+    }
+
+    public saveDisk(disk: Disk): Promise<void> {
+        return new Promise((resolve, _) => resolve());
+    }
+
+    public getDisks(): Promise<Disk[]> {
+        return new Promise((resolve, _) => resolve([]));
+    }
+}
+
+class App {
+    private renderer: Renderer;
+    private libraryDisks: LibraryDisk[];
     private emulator: Emulator;
+    private dragged: LocatedDisk | null;
+    private diskDb: DiskDb;
+
+    constructor(renderer: Renderer, emulator: Emulator, diskDb: DiskDb) {
+        this.renderer = renderer;
+        this.libraryDisks = [];
+        this.emulator = emulator;
+        this.dragged = null;
+        this.diskDb = diskDb;
+        this.diskDb.getDisks()
+            .then(disks => this.loadedDisks(disks))
+            .catch(e => console.error(e));
+
+        this.renderer.renderInit(this);
+        this.renderer.renderLibrary(this, this.libraryDisks);
+        this.renderer.renderSlots(this, this.emulator.slots);
+    }
+
+    private diskIndex(disk: LocatedDisk): number {
+        if (disk.place === 'library') {
+            for (let i = 0; i < this.libraryDisks.length; i++) {
+                if (this.libraryDisks[i].disk === disk.disk) {
+                    return i;
+                }
+            }
+        } else if (disk.place === 'slot') {
+            for (let i = 0; i < 2; i++) {
+                const slot = this.emulator.slots[i];
+                if (slot && slot.disk === disk.disk) {
+                    return i;
+                }
+            }
+        }
+        throw new Error('dragged disk does not exist');
+    }
+
+    private loadedDisks(disks: Disk[]) {
+        console.log('event: loaded disks');
+        this.libraryDisks = [];
+        for (const disk of disks) {
+            this.libraryDisks.push(new LibraryDisk(disk, 'ok'));
+        }
+        this.renderer.renderLibrary(this, this.libraryDisks);
+    }
+
+    private savedDisk(disk: Disk) {
+        console.log('event: saved disk');
+        const index = this.diskIndex({ disk, place: 'library' });
+        if (this.libraryDisks[index].canInteract()) {
+            throw new Error('invalid save');
+        }
+        this.libraryDisks[index].state = 'ok';
+        this.renderer.renderLibrary(this, this.libraryDisks);
+    }
+
+    private deletedDisk(disk: Disk) {
+        console.log('event: deleted disk');
+        const index = this.diskIndex({ disk, place: 'library' });
+        if (this.libraryDisks[index].canInteract()) {
+            throw new Error('invalid delete');
+        }
+        this.libraryDisks.splice(index, 1);
+        this.renderer.renderLibrary(this, this.libraryDisks);
+    }
+
+    private failedDiskSave(disk: Disk, error: any) {
+        console.log('event: failed disk save');
+        const index = this.diskIndex({ disk, place: 'library' });
+        if (this.libraryDisks[index].canInteract()) {
+            throw new Error('invalid delete');
+        }
+        console.error(error);
+        this.libraryDisks[index].state = 'failed';
+        this.renderer.renderLibrary(this, this.libraryDisks);
+    }
+
+    public renameDisk(disk: LocatedDisk, newLabel: string) {
+        console.log('event: rename disk');
+        const index = this.diskIndex(disk);
+        if (disk.place === 'library') {
+            if (!this.libraryDisks[index].canInteract()) {
+                return;
+            }
+            let matching = 0;
+            for (let i = 0; i < this.libraryDisks.length; i++) {
+                if (i !== index && this.libraryDisks[i].disk.label === newLabel) {
+                    matching += 1;
+                }
+            }
+            if (matching > 0) {
+                return;
+            }
+            this.libraryDisks[index].disk.label = newLabel;
+            this.renderer.renderLibrary(this, this.libraryDisks);
+        } else if (disk.place === 'slot') {
+            this.emulator.slots[index]!.disk.label = newLabel;
+            this.renderer.renderSlots(this, this.emulator.slots);
+        }
+    }
+
+    public startedDragging(dragged: LocatedDisk) {
+        console.log('event: start dragging');
+        if (dragged.place === 'library') {
+            const index = this.diskIndex(dragged);
+            if (!this.libraryDisks[index].canInteract()) {
+                return;
+            }
+        }
+        this.dragged = dragged;
+    }
+
+    public droppedOnLibrary() {
+        console.log('event: drop on library');
+        const dragged = this.dragged;
+        this.dragged = null;
+        if (!dragged) {
+            return;
+        }
+        const draggedIndex = this.diskIndex(dragged);
+
+        if (dragged.place === 'library') {
+            return;
+        } else if (dragged.place === 'slot') {
+            this.emulator.updateDiskContents(draggedIndex);
+            const disk = this.emulator.slots[draggedIndex];
+            if (!disk) {
+                return;
+            }
+            for (const libraryDisk of this.libraryDisks) {
+                if (disk.disk.label === libraryDisk.disk.label) {
+                    if (disk.disk.isSame(libraryDisk.disk)) {
+                        this.emulator.removeDisk(draggedIndex);
+                        this.renderer.renderSlots(this, this.emulator.slots);
+                        return;
+                    } else {
+                        return;
+                    }
+                }
+            }
+            const removedDisk = this.emulator.removeDisk(draggedIndex);
+            const libraryDisk = new LibraryDisk(removedDisk, 'saving');
+            this.libraryDisks.push(libraryDisk);
+            this.libraryDisks.sort((a, b) => naturalCompare(a.disk.label, b.disk.label));
+            this.diskDb.saveDisk(removedDisk)
+                .then(() => this.savedDisk(removedDisk))
+                .catch(e => this.failedDiskSave(removedDisk, e));
+            this.renderer.renderLibrary(this, this.libraryDisks);
+            this.renderer.renderSlots(this, this.emulator.slots);
+        }
+    }
+
+    public droppedOnSlot(index: number) {
+        console.log('event: drop on slot');
+        const dragged = this.dragged;
+        this.dragged = null;
+        if (!dragged) {
+            return;
+        }
+        const draggedIndex = this.diskIndex(dragged);
+
+        if (this.emulator.slots[index] !== null) {
+            return;
+        }
+
+        if (dragged.place === 'library') {
+            const disk = this.libraryDisks[draggedIndex].disk.copy();
+            this.emulator.insertDisk(index, disk);
+            this.renderer.renderSlots(this, this.emulator.slots);
+        } else if (dragged.place === 'slot') {
+            if (index !== draggedIndex) {
+                const disk = this.emulator.removeDisk(draggedIndex);
+                this.emulator.insertDisk(index, disk);
+                this.renderer.renderSlots(this, this.emulator.slots);
+            }
+        }
+    }
+
+    public droppedOnTrash() {
+        console.log('event: drop on trash');
+        const dragged = this.dragged;
+        this.dragged = null;
+        if (!dragged) {
+            return;
+        }
+        const draggedIndex = this.diskIndex(dragged);
+
+        if (dragged.place === 'library') {
+            const disk = this.libraryDisks[draggedIndex];
+            disk.state = 'deleting';
+            this.diskDb.deleteDisk(disk.disk)
+                .then(() => this.deletedDisk(disk.disk))
+                .catch(e => this.failedDiskSave(disk.disk, e));
+            this.renderer.renderLibrary(this, this.libraryDisks);
+        } else if (dragged.place === 'slot') {
+            this.emulator.removeDisk(draggedIndex);
+            this.renderer.renderSlots(this, this.emulator.slots);
+        }
+    }
+
+    public addDisk(slot: number, label: string) {
+        console.log('event: add disk');
+        if (this.emulator.slots[slot] !== null) {
+            return;
+        }
+
+        this.emulator.insertDisk(slot, new Disk(label));
+        this.renderer.renderSlots(this, this.emulator.slots);
+    }
+
+    public clickedDownload(disk: LocatedDisk) {
+        console.log('event: download disk');
+        if (disk.place === 'slot') {
+            this.emulator.updateDiskContents(this.diskIndex(disk));
+        }
+        const filename = disk.disk.label + '.bin';
+        const blob = new Blob([disk.disk.data], {type: 'application/octet-stream'});
+        if (window.navigator.msSaveOrOpenBlob as unknown) {
+            window.navigator.msSaveBlob(blob, filename);
+        } else {
+            const elem = window.document.createElement('a');
+            elem.href = window.URL.createObjectURL(blob);
+            elem.download = filename;
+            document.body.appendChild(elem);
+            elem.click();        
+            document.body.removeChild(elem);
+        }
+    }
+
+    public clickedReset() {
+        this.emulator.reset();
+    }
+
+    public keyDown(key: number) {
+        this.emulator.keyDown(key);
+    }
+
+    public keyUp(key: number) {
+        this.emulator.keyUp(key);
+    }
+
+    public blur() {
+        this.emulator.resetKeys();
+    }
+
+    public frame(dt: number) {
+        if (dt > 0.2) {
+            console.log(`${dt} seconds behind`);
+        } else {
+            this.emulator.run(dt);
+        }
+        this.renderer.renderScreen(this.emulator.screen());
+        this.renderer.updateInsertedDiskIndicators(this.emulator.slots);
+    }
+}
+
+class Renderer {
     private slots: HTMLElement[];
     private library: HTMLElement;
     private trash: HTMLElement;
-    public libraryDisks: Disk[];
-    private draggedDisk: Disk | null;
+    private canvas: HTMLCanvasElement;
+    private canvasCtx: CanvasRenderingContext2D;
+    private screenImageData: ImageData;
+    private screenPixelCount: number;
 
-    constructor(emulator: Emulator) {
-        this.emulator = emulator;
+    constructor(emulatorScreen: { width: number, height: number }) {
         this.slots = [
             document.getElementById('slot0')!,
             document.getElementById('slot1')!,
         ];
         this.library = document.getElementById('library')!;
         this.trash = document.getElementById('trash')!;
-        this.libraryDisks = [];
-        this.draggedDisk = null;
-        this.library.ondragover = e => {
-            e.preventDefault();
-        };
-        this.library.ondrop = e => {
-            e.preventDefault();
-            if (!this.draggedDisk) {
-                return;
-            }
-            let draggedDiskIndex = null;
-            for (let i = 0; i < this.emulator.slots.length; i++) {
-                const insertedDisk = this.emulator.slots[i];
-                if (insertedDisk && insertedDisk.disk == this.draggedDisk) {
-                    draggedDiskIndex = i;
-                    break;
-                }
-            }
+        this.canvas = document.getElementById('screen') as HTMLCanvasElement;
+        this.canvasCtx = this.canvas.getContext('2d')!;
+        this.screenImageData = this.canvasCtx.createImageData(emulatorScreen.width, emulatorScreen.height);
+        this.screenPixelCount = emulatorScreen.width * emulatorScreen.height;
 
-            if (draggedDiskIndex === null) {
-                return;
-            }
+    }
 
-            let addToLibrary = true;
-
-            for (let i = 0; i < this.libraryDisks.length; i++) {
-                if (this.libraryDisks[i].label == this.draggedDisk.label) {
-                    const libraryData = this.libraryDisks[i].data;
-                    const droppedData = this.draggedDisk.data;
-                    let isSame = true;
-                    for (let j = 0; j < diskSize; j++) {
-                        if (libraryData[j] != droppedData[j]) {
-                            isSame = false;
-                            break;
-                        }
-                    }
-                    if (isSame) {
-                        addToLibrary = false;
-                        break;
-                    } else {
-                        return;
-                    }
-                }
-            }
-
-            this.emulator.removeDisk(draggedDiskIndex);
-            if (addToLibrary) {
-                this.libraryDisks.push(this.draggedDisk);
-            }
-            this.draggedDisk = null;
-            this.disksChanged();
-        };
-        this.trash.ondragover = e => {
-            e.preventDefault();
-        };
+    public renderInit(app: App) {
+        this.trash.ondragover = e => e.preventDefault();
         this.trash.ondrop = e => {
             e.preventDefault();
-            for (let i = 0; i < this.emulator.slots.length; i++) {
-                const insertedDisk = this.emulator.slots[i];
-                if (!insertedDisk) {
-                    continue;
-                }
-                const disk = insertedDisk.disk;
-                if (disk == this.draggedDisk) {
-                    this.draggedDisk = null;
-                    this.emulator.removeDisk(i);
-                    this.disksChanged();
-                    return;
-                }
-            }
-            for (let i = 0; i < this.libraryDisks.length; i++) {
-                if (this.libraryDisks[i] == this.draggedDisk) {
-                    this.draggedDisk = null;
-                    if (this.libraryDisks[i].readonly) {
-                        return;
-                    }
-                    this.libraryDisks.splice(i, 1);
-                    this.disksChanged();
-                    break;
-                }
-            }
+            app.droppedOnTrash();
+        };
+        this.library.ondragover = e => e.preventDefault();
+        this.library.ondrop = e => {
+            e.preventDefault();
+            app.droppedOnLibrary();
         };
     }
 
-    createDiskElement(disk: Disk) {
+    public renderLibrary(app: App, disks: LibraryDisk[]) {
+        this.library.innerHTML = '';
+        for (const disk of disks) {
+            const elem = this.createLibraryDiskElement(app, disk);
+            this.library.appendChild(elem);
+        }
+    }
+
+    private createLibraryDiskElement(app: App, disk: LibraryDisk) {
         const d = document.createElement('div');
         d.className = 'disk diskLike';
-        this.fillSlotElement(d, disk, null);
+        this.fillSlotElement(app, d, { disk: disk.disk, place: 'library' }, disk.canInteract());
         return d;
     }
 
-    fillSlotElement(slot: HTMLElement, disk: Disk, slotIndex: number | null) {
+    private fillSlotElement(app: App, slot: HTMLElement, disk: LocatedDisk, allowInteractions: boolean) {
         slot.ondblclick = null;
         slot.ondragstart = null;
         slot.ondragend = null;
@@ -403,119 +635,53 @@ class DiskManager {
         slot.appendChild(modified);
         const label = document.createElement('span');
         label.className = 'label';
-        label.innerText = disk.label;
-        label.ondblclick = () => {
-            const newLabel = prompt('Enter new name', disk.label);
-            if (newLabel != null) {
-                disk.label = newLabel;
-                this.disksChanged();
-            }
-        };
+        label.innerText = disk.disk.label;
+        if (allowInteractions) {
+            label.ondblclick = () => {
+                const newLabel = prompt('Enter new name', disk.disk.label);
+                if (newLabel != null) {
+                    app.renameDisk(disk, newLabel);
+                }
+            };
+        }
         slot.appendChild(label);
-        const readonlyButton = document.createElement('div');
-        readonlyButton.className = disk.readonly ? 'button active' : 'button';
-        const buttonText = document.createElement('span');
-        buttonText.innerText = 'R';
-        buttonText.className = 'btntext';
-        readonlyButton.appendChild(buttonText);
-        readonlyButton.onclick = () => {
-            disk.readonly = !disk.readonly;
-            this.disksChanged();
-        };
-        slot.appendChild(readonlyButton);
         const downloadButton = document.createElement('div');
         downloadButton.className = 'button';
         const downloadSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-        downloadSvg.setAttribute('width', '20px');
-        downloadSvg.setAttribute('height', '20px');
-        const downloadPolyline = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
-        downloadPolyline.setAttribute('points', '7.5,4.5 12.5,4.5 12.5,10.5 14.5,10.5 14.5,11.5 10.5,15.5 9.5,15.5 5.5,11.5 5.5,10.5 7.5,10.5 7.5,4.5');
-        downloadSvg.appendChild(downloadPolyline);
+        downloadSvg.setAttribute('width', '13px');
+        downloadSvg.setAttribute('height', '13px');
+        const polyline1 = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+        polyline1.setAttribute('points', '6.5,0 6.5,13');
+        downloadSvg.appendChild(polyline1);
+        const polyline2 = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+        polyline2.setAttribute('points', '1,7 7,13');
+        downloadSvg.appendChild(polyline2);
+        const polyline3 = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+        polyline3.setAttribute('points', '12,7 6,13');
+        downloadSvg.appendChild(polyline3);
         downloadButton.appendChild(downloadSvg);
-        downloadButton.onclick = () => {
-            if (slotIndex !== null) {
-                this.emulator.updateDiskContents(slotIndex);
-            }
-            const filename = disk.label + '.bin';
-            const blob = new Blob([disk.data], {type: 'application/octet-stream'});
-            if (window.navigator.msSaveOrOpenBlob as unknown) {
-                window.navigator.msSaveBlob(blob, filename);
-            } else {
-                const elem = window.document.createElement('a');
-                elem.href = window.URL.createObjectURL(blob);
-                elem.download = filename;
-                document.body.appendChild(elem);
-                elem.click();        
-                document.body.removeChild(elem);
-            }
-        };
+        downloadButton.onclick = () => app.clickedDownload(disk);
         slot.appendChild(downloadButton);
-        slot.ondragstart = () => {
-            this.draggedDisk = disk;
-        };
-        slot.ondragend = () => {
-            this.draggedDisk = null;
-        };
-    }
-
-    prepEmptySlot(slot: HTMLElement, index: number) {
-        slot.ondblclick = null;
-        slot.ondragstart = null;
-        slot.ondragend = null;
-        slot.innerHTML = '';
-        slot.draggable = false;
-        slot.ondblclick = () => {
-            let label = prompt('Enter new disk name');
-            if (label !== null) {
-                const disk = new Disk(label, false);
-                this.emulator.insertDisk(index, disk);
-                this.disksChanged();
-            }
-        };
-        slot.ondragover = e => {
-            e.preventDefault();
-        };
-        slot.ondrop = e => {
-            e.preventDefault();
-            for (let i = 0; i < this.libraryDisks.length; i++) {
-                const disk = this.libraryDisks[i];
-                if (disk == this.draggedDisk) {
-                    this.draggedDisk = null;
-                    if (disk.readonly) {
-                        this.emulator.insertDisk(index, disk.copy());
-                    } else {
-                        this.libraryDisks.splice(i, 1);
-                        this.emulator.insertDisk(index, disk);
-                    }
-                    this.disksChanged();
-                    break;
-                }
-            }
-        };
-    }
-
-    disksChanged() {
-        this.libraryDisks.sort((a, b) => a.label.localeCompare(b.label));
-        this.library.innerHTML = '';
-        for (const disk of this.libraryDisks) {
-            const elem = this.createDiskElement(disk);
-            this.library.appendChild(elem);
+        if (allowInteractions) {
+            slot.ondragstart = () => app.startedDragging(disk);
         }
+    }
+
+    public renderSlots(app: App, slots: (InsertedDisk | null)[]) {
         for (let i = 0; i < 2; i++) {
-            let slot = this.emulator.slots[i];
+            let slot = slots[i];
+            this.slots[i].className = 'slot diskLike';
             if (slot === null) {
-                this.slots[i].className = 'slot diskLike';
-                this.prepEmptySlot(this.slots[i], i);
+                this.prepEmptySlot(app, this.slots[i], i);
             } else {
-                this.slots[i].className = 'disk diskLike';
-                this.fillSlotElement(this.slots[i], slot.disk, i);
+                this.fillSlotElement(app, this.slots[i], { disk: slot.disk, place: 'slot' }, true);
             }
         }
     }
 
-    updateInsertedDisks() {
+    public updateInsertedDiskIndicators(slots: (InsertedDisk | null)[]) {
         for (let i = 0; i < 2; i++) {
-            let slot = this.emulator.slots[i];
+            let slot = slots[i];
             if (slot !== null) {
                 const workingIndicator = this.slots[i].firstChild as any;
                 const workingClass = slot.working
@@ -534,4 +700,77 @@ class DiskManager {
             }
         }
     }
+
+    private prepEmptySlot(app: App, slot: HTMLElement, index: number) {
+        slot.ondblclick = null;
+        slot.ondragstart = null;
+        slot.ondragend = null;
+        slot.innerHTML = '';
+        slot.draggable = false;
+        slot.ondblclick = () => {
+            let label = prompt('Enter new disk name');
+            if (label !== null) {
+                app.addDisk(index, label);
+            }
+        };
+        slot.ondragover = e => e.preventDefault();
+        slot.ondrop = e => {
+            e.preventDefault();
+            app.droppedOnSlot(index);
+        };
+    }
+
+    public renderScreen(buffer: Uint8Array) {
+        const pixels = this.screenImageData.data;
+        const pixelCount = this.screenPixelCount;
+        for (let i = 0; i < pixelCount; i++) {
+            const byte = buffer[i];
+            const color = colorPalette[byte];
+            pixels[i * 4 + 0] = (color >> 16) & 0xff;
+            pixels[i * 4 + 1] = (color >> 8) & 0xff;
+            pixels[i * 4 + 2] = (color >> 0) & 0xff;
+            pixels[i * 4 + 3] = 255;
+        }
+        this.canvasCtx.putImageData(this.screenImageData, 0, 0);
+    }
+}
+
+function naturalCompare(a: string, b: string) {
+    function digitCount(s: string, idx: number) {
+        const start = idx;
+        while (idx < s.length) {
+            if (s[idx] < '0' || s[idx] > '9') {
+                break;
+            }
+            idx += 1;
+        }
+        return idx - start;
+    }
+    let ia = 0;
+    let ib = 0;
+    while (ia < a.length && ib < b.length) {
+        const ca = a[ia];
+        const cb = a[ib];
+        if (ca >= '0' && ca <= '9' && cb >= '0' && cb <= '9') {
+            const da = digitCount(a, ia);
+            const na = parseInt(a.substr(ia, da));
+            ia += da;
+            const db = digitCount(b, ib);
+            const nb = parseInt(b.substr(ib, db));
+            ib += db;
+            if (na < nb) {
+                return -1;
+            } else if (na > nb) {
+                return 1;
+            }
+        } else if (ca < cb) {
+            return -1;
+        } else if (ca > cb) {
+            return 1;
+        } else {
+            ia += 1;
+            ib += 1;
+        }
+    }
+    return 0;
 }
