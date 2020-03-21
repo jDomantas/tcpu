@@ -391,6 +391,17 @@ class App {
         this.renderer.renderLibrary(this, this.libraryDisks);
     }
 
+    public importDisk(disk: Disk) {
+        const libraryDisk = new LibraryDisk(disk, 'saving');
+        this.libraryDisks.push(libraryDisk);
+        this.libraryDisks.sort((a, b) => naturalCompare(a.disk.label, b.disk.label));
+        this.diskDb.saveDisk(disk)
+            .then(() => this.savedDisk(disk))
+            .catch(e => this.failedDiskSave(disk, e));
+        this.renderer.renderLibrary(this, this.libraryDisks);
+        this.renderer.renderSlots(this, this.emulator.slots);
+    }
+
     public renameDisk(disk: LocatedDisk, newLabel: string) {
         console.log('event: rename disk');
         const index = this.diskIndex(disk);
@@ -602,7 +613,34 @@ class Renderer {
         this.library.ondragover = e => e.preventDefault();
         this.library.ondrop = e => {
             e.preventDefault();
-            app.droppedOnLibrary();
+            let file: File | null = null;
+            if (e.dataTransfer?.items) {
+                for (let i = 0; i < e.dataTransfer.items.length; i++) {
+                    const item = e.dataTransfer.items[i];
+                    if (item.kind === 'file') {
+                        file = item.getAsFile()!;
+                        break;
+                    }
+                }
+            } else if (e.dataTransfer?.files) {
+                for (let i = 0; i < e.dataTransfer.files.length; i++) {
+                    file = e.dataTransfer.files[i];
+                    break;
+                }
+            }
+            if (file) {
+                const label = file.name.endsWith('.bin')
+                    ? file.name.substr(0, file.name.length - 4)
+                    : file.name;
+                const disk = new Disk(label);
+                (file.slice(0, diskSize) as any).arrayBuffer().then((buffer: ArrayBuffer) => {
+                    const toCopy = Math.min(disk.data.length, buffer.byteLength);
+                    new Uint8Array(disk.data.buffer, 0, toCopy).set(new Uint8Array(buffer, 0, toCopy));
+                    app.importDisk(disk);
+                });
+            } else {
+                app.droppedOnLibrary();
+            }
         };
     }
 
