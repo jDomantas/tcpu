@@ -1,0 +1,213 @@
+; P - editor pointer
+; I - pointer state (4 - high nibble, 0 - low nibble)
+
+    read 1, 0x4000, 0x0000
+    sub s, 2
+    mov i, 4
+
+event_loop:
+    wait
+    cmp a, 2
+    jnz a, event_loop
+
+    mov a, b
+    cmp a, 13
+    jez a, enter
+
+    mov a, b
+    cmp a, 37
+    jez a, left
+
+    mov a, b
+    cmp a, 38
+    jez a, up
+
+    mov a, b
+    cmp a, 39
+    jez a, right
+
+    mov a, b
+    cmp a, 40
+    jez a, down
+
+    mov a, b
+    cmp a, 48
+    jl a, event_loop
+
+    mov a, b
+    cmp a, 57
+    jle a, number
+
+    mov a, b
+    cmp a, 65
+    jl a, event_loop
+
+    mov a, b
+    cmp a, 70
+    jle a, letter
+
+    jmp event_loop
+
+left:
+    sub p, 1
+    and p, 0xfff
+    mov i, 4
+    jmp render
+
+right:
+    add p, 1
+    and p, 0xfff
+    mov i, 4
+    jmp render
+
+up:
+    sub p, 4
+    and p, 0xfff
+    mov i, 4
+    jmp render
+
+down:
+    add p, 4
+    and p, 0xfff
+    mov i, 4
+    jmp render
+
+enter:
+    write 1, 0x4000, 0x0000
+    jmp event_loop
+
+number:
+    mov a, b
+    sub a, 48
+    jmp entry
+
+letter:
+    mov a, b
+    sub a, 55
+    ; jmp entry
+
+entry:
+    load b, p + 0x4000
+    shl a, i
+    mov c, 0xf0
+    shr c, i
+    and b, c
+    add b, a
+    store b, p + 0x4000
+    sub i, 4
+    jez i, render
+    add p, 1
+    and p, 0xfff
+    mov i, 4
+    jmp render
+
+render:
+    push p
+    push i
+    sub p, 12
+    mov i, 8
+    mov b, 0xc000
+    mov c, 7
+render_loop:
+    and p, 0xffc
+
+    mov a, p
+    shr a, 8
+    call print_num
+    mov a, p
+    call print_num
+
+    add b, 4
+    load a, p + 0x4000
+    call print_num
+
+    add b, 4
+    load a, p + 0x4001
+    call print_num
+
+    add b, 4
+    load a, p + 0x4002
+    call print_num
+
+    add b, 4
+    load a, p + 0x4003
+    call print_num
+
+    add b, 320
+
+    add p, 4
+    sub i, 1
+    jnz i, render_loop
+
+    pop i
+    pop p
+
+    mov b, 0xc000
+    add b, 1152
+    add b, 20
+    mov c, p
+    and c, 0x3
+    shl c, 2
+    add b, c
+    shl c, 1
+    add b, c
+    add b, 4
+    sub b, i
+    load a, p + 0x4000
+    shr a, i
+    mov c, 2
+    call digit
+
+    jmp event_loop
+
+print_num:
+    ; draw number in a to place b, use color c
+    push a
+    shr a, 4
+    call digit
+    pop a
+    add b, 4
+    call digit
+    add b, 4
+    ret
+
+digit: ; draw digit in a to place b, use color c
+    and a, 0xf
+    mov j, 5
+    add a, font
+digit_loop:
+    load d, a
+    and d, 4
+    shr d, 2
+    neg d
+    and d, c
+    store d, b + 1
+
+    load d, a
+    and d, 2
+    shr d, 1
+    neg d
+    and d, c
+    store d, b + 2
+
+    load d, a
+    and d, 1
+    neg d
+    and d, c
+    store d, b + 3
+
+    add b, 64
+    add a, 16
+
+    sub j, 1
+    jnz j, digit_loop
+
+    sub b, 320
+    ret
+
+font:
+    db 0x2, 0x2, 0x6, 0x6, 0x5, 0x7, 0x3, 0x7, 0x2, 0x2, 0x2, 0x6, 0x3, 0x6, 0x7, 0x7
+    db 0x5, 0x6, 0x1, 0x1, 0x5, 0x4, 0x4, 0x1, 0x5, 0x5, 0x5, 0x5, 0x4, 0x5, 0x4, 0x4
+    db 0x5, 0x2, 0x2, 0x2, 0x7, 0x6, 0x6, 0x1, 0x2, 0x3, 0x7, 0x6, 0x4, 0x5, 0x6, 0x6
+    db 0x5, 0x2, 0x4, 0x1, 0x1, 0x1, 0x5, 0x2, 0x5, 0x1, 0x5, 0x5, 0x4, 0x5, 0x4, 0x4
+    db 0x2, 0x7, 0x7, 0x6, 0x1, 0x6, 0x2, 0x2, 0x2, 0x6, 0x5, 0x6, 0x3, 0x6, 0x7, 0x4
