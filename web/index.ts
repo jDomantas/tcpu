@@ -261,16 +261,6 @@ function main(wasm: WebAssembly.WebAssemblyInstantiatedSource) {
     }
 
     window.requestAnimationFrame(frame);
-
-    // (window as any).importDisk = (data: number[]) => {
-    //     const disk = new Disk('imported');
-    //     const len = Math.min(diskSize, data.length);
-    //     for (let i = 0; i < len; i++) {
-    //         disk.data[i] = data[i] & 0xff;
-    //     }
-    //     diskManager.libraryDisks.push(disk);
-    //     diskManager.disksChanged();
-    // };
 }
 
 type LibraryDiskState = 'ok' | 'saving' | 'deleting' | 'failed';
@@ -350,7 +340,9 @@ class OpenedLocalDb implements DiskDb {
             request.onsuccess = (e: any) => {
                 const cursor = e.target.result;
                 if (cursor) {
-                    disks.push(cursor.value);
+                    const label = cursor.value.label;
+                    const data = cursor.value.data;
+                    disks.push(new Disk(label, data));
                     cursor.continue();
                 } else {
                     resolve(disks);
@@ -676,6 +668,8 @@ class Renderer {
         this.library = document.getElementById('library')!;
         this.trash = document.getElementById('trash')!;
         this.canvas = document.getElementById('screen') as HTMLCanvasElement;
+        this.canvas.width = emulatorScreen.width;
+        this.canvas.height = emulatorScreen.height;
         this.canvasCtx = this.canvas.getContext('2d')!;
         this.screenImageData = this.canvasCtx.createImageData(emulatorScreen.width, emulatorScreen.height);
         this.screenPixelCount = emulatorScreen.width * emulatorScreen.height;
