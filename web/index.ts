@@ -420,7 +420,13 @@ class App {
     }
 
     private renderLibrary() {
-        this.libraryDisks.sort((a, b) => naturalCompare(a.disk.label, b.disk.label));
+        this.libraryDisks.sort((a, b) => {
+            const byLabel = naturalCompare(a.disk.label, b.disk.label);
+            if (byLabel !== 0) {
+                return byLabel;
+            }
+            return a.disk.id.localeCompare(b.disk.id);
+        });
         this.renderer.renderLibrary(this, this.libraryDisks);
     }
 
@@ -605,8 +611,8 @@ class App {
         }
     }
 
-    public addDisk(slot: number, label: string) {
-        console.log('event: add disk');
+    public createDiskInSlot(slot: number, label: string) {
+        console.log('event: create disk in slot');
         if (this.emulator.slots[slot] !== null) {
             return;
         }
@@ -635,6 +641,7 @@ class App {
     }
 
     public clickedReset() {
+        console.log('event: reset emulator');
         this.emulator.reset();
     }
 
@@ -836,7 +843,7 @@ class Renderer {
         slot.ondblclick = () => {
             let label = prompt('Enter new disk name');
             if (label !== null) {
-                app.addDisk(index, label);
+                app.createDiskInSlot(index, label);
             }
         };
         slot.ondragover = e => e.preventDefault();
