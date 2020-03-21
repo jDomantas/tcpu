@@ -53,8 +53,8 @@ use core::fmt;
 pub const DISK_SIZE: usize = 1 << 20;
 pub const MEMORY_SIZE: usize = 1 << 16;
 
-pub const SCREEN_WIDTH: usize = 128;
-pub const SCREEN_HEIGHT: usize = 96;
+pub const SCREEN_WIDTH: usize = 64;
+pub const SCREEN_HEIGHT: usize = 48;
 
 const SCREEN_POSITION: u16 = 0b1100_0000_0000_0000;
 const SCREEN_REFRESH_TIME: u64 = 78643;
