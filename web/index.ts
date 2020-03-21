@@ -4,19 +4,19 @@ const processorRate = 1024 * 1024 * 1.5;
 const diskActiveLightTime = processorRate / 2;
 
 class Disk {
+    public id: string;
     public label: string;
     public data: Uint8Array;
 
-    constructor(label: string, data?: Uint8Array) {
+    constructor(label: string, data?: Uint8Array, id?: string) {
+        this.id = id === undefined ? createUuid() : id;
         this.label = label;
-        this.data = data ? data : new Uint8Array(diskSize);
+        this.data = data === undefined ? new Uint8Array(diskSize) : data;
     }
 
     copy() {
         const disk = new Disk(this.label);
-        for (let i = 0; i < diskSize; i++) {
-            disk.data[i] = this.data[i];
-        }
+        disk.data.set(this.data);
         return disk;
     }
 
@@ -225,12 +225,9 @@ function main(wasm: WebAssembly.WebAssemblyInstantiatedSource) {
 
     const emulatorScreenSize = emulator.screenSize();
     const renderer = new Renderer(emulatorScreenSize);
-
     const db = new LocalDb();
-
-    (window as any).emulator = emulator;
-
     const app = new App(renderer, emulator, db);
+    (window as any).app = app;
 
     document.getElementById('reset')!.onclick = () => app.clickedReset();
 
@@ -340,9 +337,10 @@ class OpenedLocalDb implements DiskDb {
             request.onsuccess = (e: any) => {
                 const cursor = e.target.result;
                 if (cursor) {
+                    const id = cursor.value.id;
                     const label = cursor.value.label;
                     const data = cursor.value.data;
-                    disks.push(new Disk(label, data));
+                    disks.push(new Disk(label, data, id));
                     cursor.continue();
                 } else {
                     resolve(disks);
@@ -360,7 +358,7 @@ class LocalDb implements DiskDb {
         const request = indexedDB.open('disk-db', 2);
         request.onupgradeneeded = (e: any) => {
             const db = e.target.result;
-            db.createObjectStore('disks', { keyPath: 'label' });
+            db.createObjectStore('disks', { keyPath: 'id' });
         };
         this.db = new Promise((resolve, reject) => {
             request.onsuccess = (e: any) => resolve(new OpenedLocalDb(e.target.result));
@@ -399,7 +397,7 @@ class App {
             .catch(e => console.error(e));
 
         this.renderer.renderInit(this);
-        this.renderer.renderLibrary(this, this.libraryDisks);
+        this.renderLibrary();
         this.renderer.renderSlots(this, this.emulator.slots);
     }
 
@@ -421,13 +419,18 @@ class App {
         throw new Error('dragged disk does not exist');
     }
 
+    private renderLibrary() {
+        this.libraryDisks.sort((a, b) => naturalCompare(a.disk.label, b.disk.label));
+        this.renderer.renderLibrary(this, this.libraryDisks);
+    }
+
     private loadedDisks(disks: Disk[]) {
         console.log('event: loaded disks');
         this.libraryDisks = [];
         for (const disk of disks) {
             this.libraryDisks.push(new LibraryDisk(disk, 'ok'));
         }
-        this.renderer.renderLibrary(this, this.libraryDisks);
+        this.renderLibrary();
     }
 
     private savedDisk(disk: Disk) {
@@ -437,7 +440,7 @@ class App {
             throw new Error('invalid save');
         }
         this.libraryDisks[index].state = 'ok';
-        this.renderer.renderLibrary(this, this.libraryDisks);
+        this.renderLibrary();
     }
 
     private deletedDisk(disk: Disk) {
@@ -447,7 +450,7 @@ class App {
             throw new Error('invalid delete');
         }
         this.libraryDisks.splice(index, 1);
-        this.renderer.renderLibrary(this, this.libraryDisks);
+        this.renderLibrary();
     }
 
     private failedDiskSave(disk: Disk, error: any) {
@@ -458,17 +461,16 @@ class App {
         }
         console.error(error);
         this.libraryDisks[index].state = 'failed';
-        this.renderer.renderLibrary(this, this.libraryDisks);
+        this.renderLibrary();
     }
 
     public importDisk(disk: Disk) {
         const libraryDisk = new LibraryDisk(disk, 'saving');
         this.libraryDisks.push(libraryDisk);
-        this.libraryDisks.sort((a, b) => naturalCompare(a.disk.label, b.disk.label));
         this.diskDb.saveDisk(disk)
             .then(() => this.savedDisk(disk))
             .catch(e => this.failedDiskSave(disk, e));
-        this.renderer.renderLibrary(this, this.libraryDisks);
+        this.renderLibrary();
         this.renderer.renderSlots(this, this.emulator.slots);
     }
 
@@ -488,8 +490,17 @@ class App {
             if (matching > 0) {
                 return;
             }
-            this.libraryDisks[index].disk.label = newLabel;
-            this.renderer.renderLibrary(this, this.libraryDisks);
+            const disk = this.libraryDisks[index];
+            disk.state = 'saving';
+            const oldLabel = disk.disk.label;
+            disk.disk.label = newLabel;
+            this.diskDb.saveDisk(disk.disk)
+                .then(() => this.savedDisk(disk.disk))
+                .catch(e => {
+                    disk.disk.label = oldLabel;
+                    this.failedDiskSave(disk.disk, e);
+                })
+            this.renderLibrary();
         } else if (disk.place === 'slot') {
             this.emulator.slots[index]!.disk.label = newLabel;
             this.renderer.renderSlots(this, this.emulator.slots);
@@ -538,11 +549,10 @@ class App {
             const removedDisk = this.emulator.removeDisk(draggedIndex);
             const libraryDisk = new LibraryDisk(removedDisk, 'saving');
             this.libraryDisks.push(libraryDisk);
-            this.libraryDisks.sort((a, b) => naturalCompare(a.disk.label, b.disk.label));
             this.diskDb.saveDisk(removedDisk)
                 .then(() => this.savedDisk(removedDisk))
                 .catch(e => this.failedDiskSave(removedDisk, e));
-            this.renderer.renderLibrary(this, this.libraryDisks);
+            this.renderLibrary();
             this.renderer.renderSlots(this, this.emulator.slots);
         }
     }
@@ -588,7 +598,7 @@ class App {
             this.diskDb.deleteDisk(disk.disk)
                 .then(() => this.deletedDisk(disk.disk))
                 .catch(e => this.failedDiskSave(disk.disk, e));
-            this.renderer.renderLibrary(this, this.libraryDisks);
+            this.renderLibrary();
         } else if (dragged.place === 'slot') {
             this.emulator.removeDisk(draggedIndex);
             this.renderer.renderSlots(this, this.emulator.slots);
@@ -866,7 +876,7 @@ function naturalCompare(a: string, b: string) {
     let ib = 0;
     while (ia < a.length && ib < b.length) {
         const ca = a[ia];
-        const cb = a[ib];
+        const cb = b[ib];
         if (ca >= '0' && ca <= '9' && cb >= '0' && cb <= '9') {
             const da = digitCount(a, ia);
             const na = parseInt(a.substr(ia, da));
@@ -889,4 +899,13 @@ function naturalCompare(a: string, b: string) {
         }
     }
     return 0;
+}
+
+function createUuid(): string {
+    let dt = new Date().getTime();
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+        const r = (dt + Math.random() * 16) % 16 | 0;
+        dt = Math.floor(dt / 16);
+        return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+    });
 }
