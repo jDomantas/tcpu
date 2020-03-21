@@ -616,7 +616,13 @@ class Renderer {
 
     private createLibraryDiskElement(app: App, disk: LibraryDisk) {
         const d = document.createElement('div');
-        d.className = 'disk diskLike';
+        if (disk.state === 'deleting' || disk.state === 'saving') {
+            d.className = 'disk diskLike inProgressDisk';
+        } else if (disk.state === 'failed') {
+            d.className = 'disk diskLike failedDisk';
+        } else {
+            d.className = 'disk diskLike';
+        }
         this.fillSlotElement(app, d, { disk: disk.disk, place: 'library' }, disk.canInteract());
         return d;
     }
@@ -626,7 +632,7 @@ class Renderer {
         slot.ondragstart = null;
         slot.ondragend = null;
         slot.innerHTML = '';
-        slot.draggable = true;
+        slot.draggable = allowInteractions;
         const working = document.createElement('div');
         working.className = 'indicator working';
         slot.appendChild(working);
