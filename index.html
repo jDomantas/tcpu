@@ -1,0 +1,264 @@
+<html>
+    <head>
+        <script src="index.js"></script>
+        <style>
+            * {
+                box-sizing: border-box;
+            }
+
+            body {
+                background-color: #000;
+                display: flex;
+                flex-direction: row;
+                margin: 0;
+                padding: 5px;
+            }
+
+            .sidebar {
+                flex: 1;
+                display: flex;
+                flex-direction: column;
+                flex-wrap: nowrap;
+            }
+
+            #library {
+                flex: 1;
+            }
+
+            .diskLike {
+                width: 401px;
+                border: 1px solid #666;
+            }
+
+            .inProgressDisk {
+                background-color: #333;
+            }
+
+            .failedDisk {
+                background-color: #411;
+            }
+
+            #trash {
+                height: 83px;
+                margin: 5px;
+                display: flex;
+                justify-content: center;
+                align-items: center;
+            }
+
+            #screenWrap {
+                margin: 5px;
+                display: flex;
+                border: 1px solid #666;
+            }
+
+            #screen {
+                width: 896px;
+                height: 672px;
+                background-color: #000;
+            }
+
+            canvas {
+                image-rendering: optimizeSpeed;
+                image-rendering: -moz-crisp-edges;
+                image-rendering: -webkit-optimize-contrast;
+                image-rendering: -o-crisp-edges;
+                image-rendering: pixelated;
+                -ms-interpolation-mode: nearest-neighbor;
+            }
+
+            #controls {
+                display: flex;
+                flex-direction: row;
+                justify-content: space-between;
+            }
+
+            .disk, .slot {
+                height: 41px;
+                margin: 5px;
+                padding: 7px;
+                display: flex;
+                flex-direction: row;
+            }
+
+            .label {
+                color: #aaa;
+                font-family: 'Courier New', Courier, monospace;
+                font-size: 22px;
+                line-height: 26px;
+                display: flex;
+                vertical-align: top;
+                margin-left: 7px;
+                margin-top: 1px;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+                overflow: hidden;
+                flex: 1;
+            }
+
+            .indicator {
+                width: 25px;
+                height: 25px;
+                margin-right: 5px;
+                background-color: #444;
+                display: flex;
+                border: 1px solid #666;
+            }
+
+            .button {
+                width: 25px;
+                height: 25px;
+                border: 1px solid #666;
+                color: #666;
+                display: flex;
+                margin-left: 7px;
+                justify-content: center;
+                align-items: center;
+            }
+
+            .button.active {
+                color: #aaa;
+                background-color: #333;
+            }
+
+            .button:hover {
+                background-color: #444;
+            }
+
+            .indicator.working.active {
+                background-color: #3a3;
+            }
+
+            .indicator.modified.active {
+                background-color: #c70;
+            }
+
+            .btntext {
+                font-family: 'Courier New', Courier, monospace;
+                font-size: 22px;
+                text-overflow: clip;
+                white-space: nowrap;
+                overflow: hidden;
+            }
+
+            svg {
+                display: flex;
+                shape-rendering: crispEdges;
+            }
+
+            svg polyline {
+                stroke: #666;
+                stroke-width: 1px;
+                fill: none;
+            }
+
+            #reset {
+                display: flex;
+                width: 41px;
+                height: 41px;
+                margin: 5px;
+                border: 1px solid #666;
+                justify-content: center;
+                align-items: center;
+            }
+            
+            #reset:hover {
+                background-color: #444;
+            }
+
+            @media (max-width: 1328px), (max-height: 744px) {
+                .diskLike {
+                    width: 371px;
+                }
+                #screen {
+                    width: 832px;
+                    height: 624px;
+                }
+            }
+            @media (max-width: 1234px), (max-height: 696px) {
+                .diskLike {
+                    width: 341px;
+                }
+                #screen {
+                    width: 768px;
+                    height: 576px;
+                }
+            }
+            @media (max-width: 1140px), (max-height: 648px) {
+                .diskLike {
+                    width: 301px;
+                }
+                #screen {
+                    width: 704px;
+                    height: 528px;
+                }
+            }
+            @media (max-width: 1036px), (max-height: 600px) {
+                .diskLike {
+                    width: 271px;
+                }
+                #screen {
+                    width: 640px;
+                    height: 480px;
+                }
+            }
+            @media (max-width: 942px), (max-height: 552px) {
+                .diskLike {
+                    width: 241px;
+                }
+                #screen {
+                    width: 576px;
+                    height: 432px;
+                }
+            }
+            @media (max-width: 848px), (max-height: 504px) {
+                .diskLike {
+                    width: 211px;
+                }
+                #screen {
+                    width: 512px;
+                    height: 384px;
+                }
+            }
+            @media (max-width: 754px), (max-height: 456px) {
+                .diskLike {
+                    width: 181px;
+                }
+                #screen {
+                    width: 448px;
+                    height: 336px;
+                }
+            }
+        </style>
+    </head>
+    <body onload="onLoad()">
+        <div class="sidebar">
+            <div id="library">
+
+            </div>
+            <div id="trash" class="diskLike">
+                <svg width="51px" height="51px">
+                    <polyline points="0,0 51,51"></polyline>
+                    <polyline points="51,0 0,51"></polyline>
+                </svg>
+            </div>
+        </div>
+        <div id="content">
+            <div id="screenWrap">
+                <canvas id="screen"></canvas>
+            </div>
+            <div id="controls">
+                <div id="slot0" class="slot diskLike"></div>
+                <div id="slot1" class="slot diskLike"></div>
+                <div id="reset">
+                    <svg width="33px" height="33px">
+                        <polyline points="26.5,21.5 26.5,26.5 6.5,26.5 6.5,6.5 26.5,6.5 26.5,17.5"></polyline>
+                        <polyline points="26.5,17.5 21,12"></polyline>
+                        <polyline points="26.5,17.5 32,12"></polyline>
+                    </svg>
+                </div>
+            </div>
+        </div>
+        <div class="sidebar"></div>
+    </body>
+</html>
