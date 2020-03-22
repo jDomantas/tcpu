@@ -107,7 +107,7 @@ render:
     sub p, 12
     mov i, 8
     mov b, 0xc000
-    mov c, 7
+    mov c, 255
 render_loop:
     and p, 0xffc
 
@@ -155,7 +155,7 @@ render_loop:
     sub b, i
     load a, p + 0x4000
     shr a, i
-    mov c, 2
+    mov c, 95
     call digit
 
     jmp event_loop
