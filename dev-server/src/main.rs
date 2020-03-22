@@ -1,7 +1,7 @@
 use warp::Filter;
 
 fn wasm() -> Box<dyn warp::Reply> {
-    match wasm_builder::compile_emulator() {
+    match web_builder::compile_emulator() {
         Ok(bytes) => Box::new(
             warp::reply::with_header(
                 bytes,
@@ -19,7 +19,7 @@ fn wasm() -> Box<dyn warp::Reply> {
 }
 
 fn js() -> Box<dyn warp::Reply> {
-    match wasm_builder::compile_js() {
+    match web_builder::compile_js() {
         Ok(js) => Box::new(
             warp::reply::with_header(
                 js,

@@ -234,7 +234,7 @@ version = "0.1.0"
 dependencies = [
  "tokio 0.2.13 (registry+https://github.com/rust-lang/crates.io-index)",
  "warp 0.2.2 (registry+https://github.com/rust-lang/crates.io-index)",
- "wasm-builder 0.1.0",
+ "web-builder 0.1.0",
 ]
 
 [[package]]
@@ -1499,14 +1499,6 @@ version = "0.2.59"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [[package]]
-name = "wasm-builder"
-version = "0.1.0"
-dependencies = [
- "parity-wasm 0.41.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "wasm-gc-api 0.1.11 (registry+https://github.com/rust-lang/crates.io-index)",
-]
-
-[[package]]
 name = "wasm-gc-api"
 version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1514,6 +1506,14 @@ dependencies = [
  "log 0.4.8 (registry+https://github.com/rust-lang/crates.io-index)",
  "parity-wasm 0.32.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "rustc-demangle 0.1.16 (registry+https://github.com/rust-lang/crates.io-index)",
+]
+
+[[package]]
+name = "web-builder"
+version = "0.1.0"
+dependencies = [
+ "parity-wasm 0.41.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "wasm-gc-api 0.1.11 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]

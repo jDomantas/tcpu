@@ -4,5 +4,5 @@ members = [
     "dev-server",
     "tcpu",
     "tcpu-wasm",
-    "wasm-builder",
+    "web-builder",
 ]

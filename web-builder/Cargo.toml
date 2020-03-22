@@ -1,5 +1,5 @@
 [package]
-name = "wasm-builder"
+name = "web-builder"
 version = "0.1.0"
 authors = ["djade <djadenkus@gmail.com>"]
 edition = "2018"

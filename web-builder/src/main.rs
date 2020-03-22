@@ -16,7 +16,7 @@ fn find_callees(f: &wasm::FuncBody) -> HashSet<u32> {
 }
 
 fn main() {
-    let wasm = match wasm_builder::compile_emulator() {
+    let wasm = match web_builder::compile_emulator() {
         Ok(wasm) => wasm,
         Err(e) => {
             eprintln!("{}", e);
