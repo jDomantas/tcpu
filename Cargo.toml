@@ -1,8 +1,8 @@
 [workspace]
 members = [
     "asm",
+    "builder",
     "dev-server",
     "tcpu",
     "tcpu-wasm",
-    "web-builder",
 ]

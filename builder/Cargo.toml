@@ -1,5 +1,5 @@
 [package]
-name = "web-builder"
+name = "builder"
 version = "0.1.0"
 authors = ["djade <djadenkus@gmail.com>"]
 edition = "2018"
@@ -7,3 +7,5 @@ edition = "2018"
 [dependencies]
 wasm-gc-api = "0.1.11"
 parity-wasm = "0.41.0"
+git2 = "0.13.0"
+whoami = "0.8.1"

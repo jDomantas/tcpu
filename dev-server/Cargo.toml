@@ -7,4 +7,4 @@ edition = "2018"
 [dependencies]
 tokio = { version = "0.2", features = ["macros"] }
 warp = "0.2"
-web-builder = { path = "../web-builder" }
+builder = { path = "../builder" }

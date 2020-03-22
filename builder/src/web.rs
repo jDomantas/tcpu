@@ -1,19 +1,6 @@
 use std::error::Error;
-use std::fmt;
 use std::process::Command;
-
-#[derive(Debug)]
-pub struct CompileError {
-    stderr: String,
-}
-
-impl fmt::Display for CompileError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "failed to compile:\n{}", self.stderr)
-    }
-}
-
-impl Error for CompileError {}
+use crate::CompileError;
 
 pub fn compile_emulator() -> Result<Vec<u8>, Box<dyn Error>> {
     let output = Command::new("cargo")

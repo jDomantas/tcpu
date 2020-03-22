@@ -222,7 +222,7 @@ const imports = {
 
 function onLoad() {
     WebAssembly
-        .instantiateStreaming(fetch("/tcpu.wasm"), imports)
+        .instantiateStreaming(fetch("tcpu.wasm"), imports)
         .then(main);
 }
 
