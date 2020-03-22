@@ -1,0 +1,33 @@
+    mov i, 0xc000
+    mov c, 0
+    mov b, 16
+row:
+    mov j, 16
+tile:
+    store c, i + 0
+    store c, i + 1
+    store c, i + 2
+    store c, i + 3
+    store c, i + 64
+    store c, i + 65
+    store c, i + 66
+    store c, i + 67
+    store c, i + 128
+    store c, i + 129
+    store c, i + 130
+    store c, i + 131
+    store c, i + 192
+    store c, i + 193
+    store c, i + 194
+    store c, i + 195
+    add c, 1
+    sub j, 1
+    add i, 4
+    jnz j, tile
+
+    add i, 128
+    sub b, 1
+    jnz b, row
+
+halt:
+    jmp halt

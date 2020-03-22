@@ -173,30 +173,36 @@ class Emulator {
     }
 }
 
-function getColor(r: number, g: number, b: number) {
-    function normalize(p: number, max: number) {
-        p /= maxColor;
-        p = Math.pow(p, 0.5);
-        return Math.round(p * max);
+function getColor(index: number): { r: number, g: number, b: number } {
+    function toRgb(h: number, s: number, v: number) {
+        while (h < 0) h += 360;
+        while (h >= 360) h -= 360;
+        const c = v * s;
+        const x = c * (1 - Math.abs(h / 60 % 2 - 1));
+        const m = v - c;
+        if (  0 <= h && h <  60) return { r: (c + m) * 255, g: (x + m) * 255, b: (0 + m) * 255 };
+        if ( 60 <= h && h < 120) return { r: (x + m) * 255, g: (c + m) * 255, b: (0 + m) * 255 };
+        if (120 <= h && h < 180) return { r: (0 + m) * 255, g: (c + m) * 255, b: (x + m) * 255 };
+        if (180 <= h && h < 240) return { r: (0 + m) * 255, g: (x + m) * 255, b: (c + m) * 255 };
+        if (240 <= h && h < 300) return { r: (x + m) * 255, g: (0 + m) * 255, b: (c + m) * 255 };
+        if (300 <= h && h < 360) return { r: (c + m) * 255, g: (0 + m) * 255, b: (x + m) * 255 };
+        throw new Error(`h = ${h}`);
     }
-
-    let maxR = (228 * 0.8) | 0;
-    let maxG = (200 * 0.8) | 0;
-    let maxB = (255 * 0.8) | 0;
-    return {
-        r: normalize(r, maxR),
-        g: normalize(g, maxG),
-        b: normalize(b, maxB),
-    };
+    const h = (index >> 4) & 15;
+    const s = (index >> 3) & 1;
+    const v = index & 7;
+    if (h === 15) {
+        return toRgb(0, 0, (index % 16) / 15);
+    }
+    return toRgb(h / 15 * 360, s * 0.5 + 0.4, Math.pow(v / 7, 0.9));
 }
 
-const maxColor = 1;
 const colorPalette = new Array(256);
 for (let i = 0; i < 256; i++) {
-    const r = (i >> 2) & 1;
-    const g = (i >> 1) & 1;
-    const b = (i >> 0) & 1;
-    const color = getColor(r, g, b);
+    const color = getColor(i);
+    color.r = Math.round(color.r) & 0xff;
+    color.g = Math.round(color.g) & 0xff;
+    color.b = Math.round(color.b) & 0xff;
     colorPalette[i] = (color.r << 16) | (color.g << 8) | (color.b << 0);
 }
 
